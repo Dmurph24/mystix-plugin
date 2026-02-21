@@ -1,18 +1,20 @@
 package com.mystix.api;
 
 import com.mystix.MystixConfig;
-import com.mystix.model.TimerUpdatePayload;
+import com.mystix.model.TimerSyncItem;
+import com.mystix.model.TimersSyncPayload;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
+import java.util.List;
 import javax.inject.Inject;
 import javax.inject.Singleton;
 import lombok.extern.slf4j.Slf4j;
 
 /**
- * Sends timer update payloads to the Mystix API with X-RuneLite-Key header authorization.
+ * Sends bulk timer sync to the Mystix API with X-RuneLite-Key header authorization.
  */
 @Slf4j
 @Singleton
@@ -20,7 +22,7 @@ public class MystixApiClient
 {
 	private static final Duration REQUEST_TIMEOUT = Duration.ofSeconds(10);
 	private static final String API_BASE_URL = "https://api.mystix.app";
-	private static final String ENDPOINT_PATH = "/api/v1/timers";
+	private static final String ENDPOINT_PATH = "/api/runelite/timers/";
 
 	private final MystixConfig config;
 	private final HttpClient httpClient;
@@ -35,10 +37,10 @@ public class MystixApiClient
 	}
 
 	/**
-	 * Sends a timer update to the Mystix API. Runs asynchronously to avoid blocking.
+	 * Sends bulk timer sync to the Mystix API. Runs asynchronously to avoid blocking.
 	 * Logs errors without affecting RuneLite stability.
 	 */
-	public void sendTimerUpdate(TimerUpdatePayload payload)
+	public void sendTimersSync(List<TimerSyncItem> timers)
 	{
 		String appKey = config.mystixAppKey();
 		if (appKey == null || appKey.isBlank())
@@ -48,7 +50,7 @@ public class MystixApiClient
 		}
 
 		String url = API_BASE_URL.replaceAll("/$", "") + ENDPOINT_PATH;
-		String json = payload.toJson();
+		String json = TimersSyncPayload.toJson(timers);
 
 		try
 		{
@@ -65,22 +67,22 @@ public class MystixApiClient
 				{
 					if (response.statusCode() >= 200 && response.statusCode() < 300)
 					{
-						log.debug("Timer update sent successfully: {}", payload.getEntity());
+						log.info("Mystix timers sync successful: {} timers", timers.size());
 					}
 					else
 					{
-						log.warn("Mystix API returned {} for {}: {}", response.statusCode(), payload.getEntity(), response.body());
+						log.warn("Mystix API returned {}: {}", response.statusCode(), response.body());
 					}
 				})
 				.exceptionally(ex ->
 				{
-					log.warn("Failed to send timer update to Mystix API: {}", ex.getMessage());
+					log.warn("Failed to send timers sync to Mystix API: {}", ex.getMessage());
 					return null;
 				});
 		}
 		catch (Exception e)
 		{
-			log.warn("Failed to send timer update: {}", e.getMessage());
+			log.warn("Failed to send timers sync: {}", e.getMessage());
 		}
 	}
 }

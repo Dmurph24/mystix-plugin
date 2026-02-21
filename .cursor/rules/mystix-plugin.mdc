@@ -22,7 +22,7 @@ alwaysApply: true
 ## Time Tracking Integration
 
 - Inject `FarmingTracker`, `BirdHouseTracker`, `ClockManager` from RuneLite (core Time Tracking plugin).
-- Send expected finish timestamps (epoch seconds) so the server can schedule notifications.
+- Send bulk timers sync to POST /api/runelite/timers/ with format {timers: [{name, completed_at, notifications_enabled, player_username}]}. Only send when timer data changes.
 - Respect `syncTimeTracking` config toggle before syncing any Time Tracking data.
 
 ## Tests
