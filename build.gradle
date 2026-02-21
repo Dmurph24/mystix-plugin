@@ -14,7 +14,7 @@ repositories {
 }
 
 def runeLiteVersion = 'latest.release'
-def pluginMainClass = 'com.example.ExamplePluginTest'
+def pluginMainClass = 'com.mystix.MystixPluginTest'
 
 dependencies {
 	compileOnly group: 'net.runelite', name:'client', version: runeLiteVersion
@@ -27,7 +27,7 @@ dependencies {
 	testImplementation group: 'net.runelite', name:'jshell', version: runeLiteVersion
 }
 
-group = 'com.example'
+group = 'com.mystix'
 version = '1.0-SNAPSHOT'
 
 tasks.withType(JavaCompile).configureEach {
@@ -39,8 +39,8 @@ tasks.register('run', JavaExec) {
 	classpath = sourceSets.test.runtimeClasspath
 	mainClass = pluginMainClass
 
-	jvmArgs "-ea"
-	args "--developer-mode", "--debug"
+	jvmArgs "-ea", "--add-exports", "java.desktop/com.apple.eawt=ALL-UNNAMED"
+	args "--developer-mode", "--debug", "--insecure-write-credentials"
 }
 
 tasks.register('shadowJar', Jar) {

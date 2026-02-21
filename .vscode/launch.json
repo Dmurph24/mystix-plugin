@@ -1,0 +1,14 @@
+{
+	"version": "0.2.0",
+	"configurations": [
+		{
+			"type": "java",
+			"name": "RuneLite (Mystix Plugin)",
+			"request": "launch",
+			"mainClass": "com.mystix.MystixPluginTest",
+			"projectName": "mystix-plugin",
+			"vmArgs": "-ea --add-exports java.desktop/com.apple.eawt=ALL-UNNAMED",
+			"args": "--developer-mode --debug"
+		}
+	]
+}

@@ -1,0 +1,38 @@
+---
+description: Mystix RuneLite plugin development guidelines
+globs: 
+alwaysApply: true
+---
+
+# Mystix Plugin Development Rules
+
+## Plugin-hub Compliance
+
+- **No new third-party dependencies**: Use only Java standard library and transitive dependencies from runelite-client (e.g. java.net.http.HttpClient for API calls). Adding new dependencies requires cryptographic hash verification and extends review time.
+- **Java only**: No Kotlin, Scala, or other JVM languages. No reflection, JNI, subprocesses, or downloading/running external code.
+- **License**: BSD 2-Clause for plugin-hub compatibility.
+- **Rejected features**: Do not expose player information over HTTP in a way that broadcasts to others; Mystix is user-initiated sync with their own API key.
+
+## RuneLite Patterns
+
+- Use `@PluginDescriptor`, `@Inject`, `@Provides` for plugin setup.
+- Config interfaces extend `Config` with `@ConfigGroup("mystix")` and `@ConfigItem` for each setting.
+- One sync toggle per source plugin: `syncTimeTracking`, `sync{PluginName}` for future plugins.
+
+## Time Tracking Integration
+
+- Inject `FarmingTracker`, `BirdHouseTracker`, `ClockManager` from RuneLite (core Time Tracking plugin).
+- Send expected finish timestamps (epoch seconds) so the server can schedule notifications.
+- Respect `syncTimeTracking` config toggle before syncing any Time Tracking data.
+
+## Tests
+
+- Write unit tests for MystixConfig (defaults, key retrieval).
+- Write unit tests for MystixApiClient (URL, headers, payload shape; mock HttpClient).
+- Write unit tests for TimerMonitor (sync toggle, deduplication).
+- Keep MystixPluginTest as the RuneLite launcher for manual testing (`run` task).
+
+## Documentation
+
+- Update README.md when adding new features.
+- Document setup (App Key from Mystix app), sync toggles, and feature list.
