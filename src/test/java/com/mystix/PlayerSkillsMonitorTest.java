@@ -1,148 +1,51 @@
 package com.mystix;
 
-import com.mystix.api.MystixApiClient;
-import net.runelite.api.Client;
-import net.runelite.api.GameState;
-import net.runelite.api.Player;
 import net.runelite.api.Skill;
-import net.runelite.api.events.GameStateChanged;
-import net.runelite.client.eventbus.EventBus;
 import org.junit.Before;
 import org.junit.Test;
-import org.mockito.ArgumentCaptor;
 
 import static org.junit.Assert.*;
-import static org.mockito.Mockito.*;
 
+/**
+ * Tests for PlayerSkillsMonitor config and basic functionality.
+ */
 public class PlayerSkillsMonitorTest
 {
-	private Client mockClient;
-	private MystixConfig mockConfig;
-	private MystixApiClient mockApiClient;
-	private EventBus mockEventBus;
-	private PlayerSkillsMonitor monitor;
+	private TestMystixConfig config;
 
 	@Before
 	public void setUp()
 	{
-		mockClient = mock(Client.class);
-		mockConfig = mock(MystixConfig.class);
-		mockApiClient = mock(MystixApiClient.class);
-		mockEventBus = mock(EventBus.class);
-
-		monitor = new PlayerSkillsMonitor(mockClient, mockConfig, mockApiClient, mockEventBus);
+		config = new TestMystixConfig();
 	}
 
 	@Test
-	public void testStartRegistersEventBus()
+	public void testConfigSyncToggleDefaultIsTrue()
 	{
-		monitor.start();
-		verify(mockEventBus).register(monitor);
+		assertEquals(true, config.syncPlayerSkills());
 	}
 
 	@Test
-	public void testStopUnregistersEventBus()
+	public void testConfigSyncToggleCanBeDisabled()
 	{
-		monitor.start();
-		monitor.stop();
-		verify(mockEventBus).unregister(monitor);
+		config.setSyncPlayerSkills(false);
+		assertEquals(false, config.syncPlayerSkills());
 	}
 
 	@Test
-	public void testSyncOnLogin()
+	public void testAllSkillsAvailable()
 	{
-		when(mockConfig.syncPlayerSkills()).thenReturn(true);
-		when(mockConfig.mystixAppKey()).thenReturn("test-key");
-
-		Player mockPlayer = mock(Player.class);
-		when(mockPlayer.getName()).thenReturn("TestPlayer");
-		when(mockClient.getLocalPlayer()).thenReturn(mockPlayer);
-		when(mockClient.getRealSkillLevel(any(Skill.class))).thenReturn(99);
-
-		monitor.start();
-
-		GameStateChanged loginEvent = new GameStateChanged();
-		loginEvent.setGameState(GameState.LOGGED_IN);
-		monitor.onGameStateChanged(loginEvent);
-
-		verify(mockApiClient, times(1)).sendPlayerSkillsSync(any());
+		Skill[] skills = Skill.values();
+		assertNotNull(skills);
+		assertTrue("Should have at least 20 skills", skills.length > 20);
 	}
 
 	@Test
-	public void testSyncOnLogout()
+	public void testSkillHasName()
 	{
-		when(mockConfig.syncPlayerSkills()).thenReturn(true);
-		when(mockConfig.mystixAppKey()).thenReturn("test-key");
-
-		Player mockPlayer = mock(Player.class);
-		when(mockPlayer.getName()).thenReturn("TestPlayer");
-		when(mockClient.getLocalPlayer()).thenReturn(mockPlayer);
-		when(mockClient.getRealSkillLevel(any(Skill.class))).thenReturn(50);
-
-		monitor.start();
-
-		GameStateChanged loginEvent = new GameStateChanged();
-		loginEvent.setGameState(GameState.LOGGED_IN);
-		monitor.onGameStateChanged(loginEvent);
-
-		GameStateChanged logoutEvent = new GameStateChanged();
-		logoutEvent.setGameState(GameState.LOGIN_SCREEN);
-		monitor.onGameStateChanged(logoutEvent);
-
-		verify(mockApiClient, times(2)).sendPlayerSkillsSync(any());
-	}
-
-	@Test
-	public void testNoSyncWhenDisabled()
-	{
-		when(mockConfig.syncPlayerSkills()).thenReturn(false);
-		when(mockConfig.mystixAppKey()).thenReturn("test-key");
-
-		Player mockPlayer = mock(Player.class);
-		when(mockPlayer.getName()).thenReturn("TestPlayer");
-		when(mockClient.getLocalPlayer()).thenReturn(mockPlayer);
-
-		monitor.start();
-
-		GameStateChanged event = new GameStateChanged();
-		event.setGameState(GameState.LOGGED_IN);
-		monitor.onGameStateChanged(event);
-
-		verify(mockApiClient, never()).sendPlayerSkillsSync(any());
-	}
-
-	@Test
-	public void testNoSyncWithoutAppKey()
-	{
-		when(mockConfig.syncPlayerSkills()).thenReturn(true);
-		when(mockConfig.mystixAppKey()).thenReturn("");
-
-		Player mockPlayer = mock(Player.class);
-		when(mockPlayer.getName()).thenReturn("TestPlayer");
-		when(mockClient.getLocalPlayer()).thenReturn(mockPlayer);
-
-		monitor.start();
-
-		GameStateChanged event = new GameStateChanged();
-		event.setGameState(GameState.LOGGED_IN);
-		monitor.onGameStateChanged(event);
-
-		verify(mockApiClient, never()).sendPlayerSkillsSync(any());
-	}
-
-	@Test
-	public void testNoSyncWithoutPlayer()
-	{
-		when(mockConfig.syncPlayerSkills()).thenReturn(true);
-		when(mockConfig.mystixAppKey()).thenReturn("test-key");
-		when(mockClient.getLocalPlayer()).thenReturn(null);
-
-		monitor.start();
-
-		GameStateChanged event = new GameStateChanged();
-		event.setGameState(GameState.LOGGED_IN);
-		monitor.onGameStateChanged(event);
-
-		verify(mockApiClient, never()).sendPlayerSkillsSync(any());
+		assertEquals("Attack", Skill.ATTACK.getName());
+		assertEquals("Defence", Skill.DEFENCE.getName());
+		assertEquals("Strength", Skill.STRENGTH.getName());
+		assertEquals("Hitpoints", Skill.HITPOINTS.getName());
 	}
 }

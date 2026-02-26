@@ -7,6 +7,7 @@ public class TestMystixConfig implements MystixConfig
 {
 	private String mystixAppKey = "";
 	private boolean syncTimeTracking = true;
+	private boolean syncPlayerSkills = true;
 
 	@Override
 	public String mystixAppKey()
@@ -20,6 +21,12 @@ public class TestMystixConfig implements MystixConfig
 		return syncTimeTracking;
 	}
 
+	@Override
+	public boolean syncPlayerSkills()
+	{
+		return syncPlayerSkills;
+	}
+
 	public void setMystixAppKey(String key)
 	{
 		this.mystixAppKey = key;
@@ -28,5 +35,10 @@ public class TestMystixConfig implements MystixConfig
 	public void setSyncTimeTracking(boolean value)
 	{
 		this.syncTimeTracking = value;
+	}
+
+	public void setSyncPlayerSkills(boolean value)
+	{
+		this.syncPlayerSkills = value;
 	}
 }
