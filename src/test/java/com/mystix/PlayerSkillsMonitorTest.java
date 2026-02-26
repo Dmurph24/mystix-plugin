@@ -20,19 +20,6 @@ public class PlayerSkillsMonitorTest
 	}
 
 	@Test
-	public void testConfigSyncToggleDefaultIsTrue()
-	{
-		assertEquals(true, config.syncPlayerSkills());
-	}
-
-	@Test
-	public void testConfigSyncToggleCanBeDisabled()
-	{
-		config.setSyncPlayerSkills(false);
-		assertEquals(false, config.syncPlayerSkills());
-	}
-
-	@Test
 	public void testAllSkillsAvailable()
 	{
 		Skill[] skills = Skill.values();

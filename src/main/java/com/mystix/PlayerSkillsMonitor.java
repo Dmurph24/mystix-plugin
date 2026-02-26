@@ -79,12 +79,6 @@ public class PlayerSkillsMonitor
 
 	private void syncPlayerSkills()
 	{
-		if (!config.syncPlayerSkills())
-		{
-			log.debug("Player skills sync skipped: sync disabled");
-			return;
-		}
-
 		if (config.mystixAppKey() == null || config.mystixAppKey().isBlank())
 		{
 			log.debug("Player skills sync skipped: no App Key configured");

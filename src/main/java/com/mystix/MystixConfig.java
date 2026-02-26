@@ -29,15 +29,4 @@ public interface MystixConfig extends Config
 	{
 		return true;
 	}
-
-	@ConfigItem(
-		keyName = "syncPlayerSkills",
-		name = "Player Skills",
-		description = "Sync player skills and levels to Mystix when logging in or out.",
-		position = 2
-	)
-	default boolean syncPlayerSkills()
-	{
-		return true;
-	}
 }
