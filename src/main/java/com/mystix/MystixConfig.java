@@ -29,4 +29,15 @@ public interface MystixConfig extends Config
 	{
 		return true;
 	}
+
+	@ConfigItem(
+		keyName = "syncWiseOldMan",
+		name = "Sync with Wise Old Man",
+		description = "Update your Wise Old Man profile automatically when you log in or out.",
+		position = 2
+	)
+	default boolean syncWiseOldMan()
+	{
+		return true;
+	}
 }
