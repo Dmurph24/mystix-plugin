@@ -22,9 +22,23 @@ Each source plugin has an on/off toggle. Enable only the plugins you want synced
 
 ## Building
 
+Before building, copy the farming/hunter timer classes from RuneLite (required for per-patch timer names):
+
+```bash
+# 1. Clone RuneLite as a sibling directory (one-time)
+cd .. && git clone https://github.com/runelite/runelite.git
+
+# 2. Copy and patch the timer classes into this project
+cd mystix-plugin && npm install && node update.js
+```
+
+Then build:
+
 ```bash
 ./gradlew build
 ```
+
+The `update.js` script copies `farming/` and `hunter/` from RuneLite and patches package names/visibility. See [runelite-time-tracking-reminder](https://github.com/queicherius/runelite-time-tracking-reminder) for the pattern.
 
 ## Running Locally
 

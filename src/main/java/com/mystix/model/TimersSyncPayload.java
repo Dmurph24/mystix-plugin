@@ -4,7 +4,8 @@ import java.util.List;
 
 /**
  * Bulk timers sync payload matching the backend TimersSyncSerializer.
- * {"timers": [{name, completed_at, notifications_enabled, player_username}, ...]}
+ * {"timers": [{timer_type, region, entity, completed_at, notifications_enabled, player_username}, ...]}
+ * All strings are lowercased with spaces (no underscores).
  */
 public final class TimersSyncPayload
 {

@@ -16,15 +16,18 @@ import net.runelite.api.Client;
 import net.runelite.api.GameState;
 import net.runelite.api.Player;
 import net.runelite.client.plugins.timetracking.SummaryState;
-import net.runelite.client.plugins.timetracking.Tab;
-import net.runelite.client.plugins.timetracking.farming.FarmingTracker;
-import net.runelite.client.plugins.timetracking.hunter.BirdHouseTracker;
+import com.mystix.runelite.farming.FarmingPatch;
+import com.mystix.runelite.farming.FarmingTracker;
+import com.mystix.runelite.farming.PatchPrediction;
+import com.mystix.runelite.farming.Produce;
+import com.mystix.runelite.hunter.BirdHouseTracker;
 
 /**
  * Collects expected finish times from Time Tracking and sends them to the
  * Mystix API
  * so the server can schedule notifications when timers complete.
  * Only sends when timer data changes to avoid excess API calls.
+ * Uses copied farming/hunter classes (see update.js) for per-patch names.
  */
 @Slf4j
 @Singleton
@@ -35,10 +38,11 @@ public class TimerMonitor {
 	private final Client client;
 	private final MystixConfig config;
 	private final MystixApiClient apiClient;
-	private final FarmingTracker farmingTracker;
-	private final BirdHouseTracker birdHouseTracker;
 	private final ScheduledExecutorService executorService;
 
+	private FarmingTracker farmingTracker;
+	private BirdHouseTracker birdHouseTracker;
+	private com.mystix.runelite.farming.FarmingWorld farmingWorld;
 	private ScheduledFuture<?> scheduledFuture;
 	private String lastSentSnapshot;
 
@@ -47,18 +51,24 @@ public class TimerMonitor {
 			Client client,
 			MystixConfig config,
 			MystixApiClient apiClient,
-			FarmingTracker farmingTracker,
-			BirdHouseTracker birdHouseTracker,
 			ScheduledExecutorService executorService) {
 		this.client = client;
 		this.config = config;
 		this.apiClient = apiClient;
-		this.farmingTracker = farmingTracker;
-		this.birdHouseTracker = birdHouseTracker;
 		this.executorService = executorService;
 	}
 
+	public void initialize(FarmingTracker farmingTracker, BirdHouseTracker birdHouseTracker, com.mystix.runelite.farming.FarmingWorld farmingWorld) {
+		this.farmingTracker = farmingTracker;
+		this.birdHouseTracker = birdHouseTracker;
+		this.farmingWorld = farmingWorld;
+	}
+
 	public void start() {
+		if (farmingTracker == null || birdHouseTracker == null) {
+			log.warn("TimerMonitor not initialized; skipping start");
+			return;
+		}
 		if (scheduledFuture != null) {
 			return;
 		}
@@ -103,28 +113,44 @@ public class TimerMonitor {
 		// Refresh FarmingTracker from config (it only auto-updates when player is in a
 		// farming region)
 		farmingTracker.loadCompletionTimes();
+		birdHouseTracker.loadFromConfig();
+		birdHouseTracker.updateCompletionTime();
+		farmingTracker.updateCompletionTime();
 
 		long now = Instant.now().getEpochSecond();
 		boolean notificationsEnabled = config.syncTimeTracking();
 		List<TimerSyncItem> timers = new ArrayList<>();
 
-		// Farming patches (tab-level; per-patch names require package-private access)
-		for (Tab tab : Tab.FARMING_TABS) {
-			SummaryState summary = farmingTracker.getSummary(tab);
-			long completionTime = farmingTracker.getCompletionTime(tab);
-			if (summary == SummaryState.IN_PROGRESS && completionTime > 0 && completionTime > now) {
-				String tabLabel = tab.getName();
+		// Per-patch timers with readable names (e.g. "Farming Guild", "Catherby")
+		for (var entry : farmingWorld.getTabs().entrySet()) {
+			for (FarmingPatch patch : entry.getValue()) {
+				PatchPrediction prediction = farmingTracker.predictPatch(patch);
+				if (prediction == null || prediction.getProduce().getItemID() < 0) {
+					continue;
+				}
+				if (prediction.getProduce() == Produce.WEEDS || prediction.getProduce() == Produce.SCARECROW) {
+					continue;
+				}
+				long doneEstimate = prediction.getDoneEstimate();
+				if (doneEstimate <= 0 || doneEstimate <= now) {
+					continue;
+				}
+				String regionName = patch.getRegion().getName();
+				if (regionName == null || regionName.isBlank()) {
+					regionName = entry.getKey().name().toLowerCase();
+				}
+				String tabName = entry.getKey().getName();
+				if (tabName == null || tabName.isBlank()) {
+					tabName = entry.getKey().name().toLowerCase();
+				}
 				timers.add(new TimerSyncItem(
-						(tabLabel != null && !tabLabel.isBlank() ? tabLabel : tab.name()).toLowerCase(),
-						Instant.ofEpochSecond(completionTime),
+						tabName,
+						regionName,
+						prediction.getProduce().getName(),
+						Instant.ofEpochSecond(doneEstimate),
 						notificationsEnabled,
 						playerUsername));
 			}
-		}
-
-		if (timers.isEmpty()) {
-			log.debug("Mystix: 0 timers; HERB summary={}, completionTime={}, now={}",
-					farmingTracker.getSummary(Tab.HERB), farmingTracker.getCompletionTime(Tab.HERB), now);
 		}
 
 		// Bird houses
@@ -132,7 +158,9 @@ public class TimerMonitor {
 			long completionTime = birdHouseTracker.getCompletionTime();
 			if (completionTime > 0 && completionTime > now) {
 				timers.add(new TimerSyncItem(
-						"birdhouse",
+						"bird house",
+						"fossil island",
+						"bird house",
 						Instant.ofEpochSecond(completionTime),
 						notificationsEnabled,
 						playerUsername));

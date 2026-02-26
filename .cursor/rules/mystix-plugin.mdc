@@ -6,6 +6,13 @@ alwaysApply: true
 
 # Mystix Plugin Development Rules
 
+## Monorepo Paths
+
+This project lives at `mystix-plugin/` within the parent monorepo at `/Users/danielmurphy/Documents/mystix/`.
+
+- Backend: `../mystix-backend/`
+- Shared monorepo rules: `../.cursor/rules/monorepo-overview.mdc`
+
 ## Plugin-hub Compliance
 
 - **No new third-party dependencies**: Use only Java standard library and transitive dependencies from runelite-client (e.g. java.net.http.HttpClient for API calls). Adding new dependencies requires cryptographic hash verification and extends review time.
