@@ -1,8 +1,18 @@
 # Backend API Documentation
 
-## Finding API Documentation
+## Interactive API Docs (Swagger / ReDoc)
 
-The Mystix backend API documentation is maintained as an Insomnia collection. When implementing new API integrations:
+Production API docs are publicly available at `https://api.mystix.app`:
+
+- **Swagger UI**: `https://api.mystix.app/api/docs/` — Interactive "Try it out" explorer
+- **ReDoc**: `https://api.mystix.app/api/redoc/` — Clean documentation
+- **OpenAPI Schema**: `https://api.mystix.app/api/schema/` — Raw spec for codegen/clients
+
+Local dev: `http://localhost:8000/api/docs/`, etc.
+
+## Insomnia Collection
+
+The Mystix backend API documentation is also maintained as an Insomnia collection. When implementing new API integrations:
 
 1. Request the `insomnia_collection.json` file from the backend repository or team
 2. The collection contains all API endpoints with:
