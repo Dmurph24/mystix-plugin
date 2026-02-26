@@ -99,15 +99,22 @@ public class PlayerSkillsMonitor
 			return;
 		}
 
-		Map<String, Integer> skills = new HashMap<>();
+		Map<String, PlayerSkillsSyncPayload.SkillData> skills = new HashMap<>();
+		int totalLevel = 0;
+		
 		for (Skill skill : Skill.values())
 		{
 			int level = client.getRealSkillLevel(skill);
-			skills.put(skill.getName(), level);
+			int xp = client.getSkillExperience(skill);
+			skills.put(skill.getName(), new PlayerSkillsSyncPayload.SkillData(level, xp));
+			totalLevel += level;
 		}
 
-		PlayerSkillsSyncPayload payload = new PlayerSkillsSyncPayload(playerUsername, skills);
-		log.info("Syncing {} skills for player: {}", skills.size(), playerUsername);
+		int combatLevel = localPlayer.getCombatLevel();
+
+		PlayerSkillsSyncPayload payload = new PlayerSkillsSyncPayload(playerUsername, skills, totalLevel, combatLevel);
+		log.info("Syncing {} skills for player: {} (Total Level: {}, Combat Level: {})", 
+			skills.size(), playerUsername, totalLevel, combatLevel);
 		apiClient.sendPlayerSkillsSync(payload);
 	}
 }

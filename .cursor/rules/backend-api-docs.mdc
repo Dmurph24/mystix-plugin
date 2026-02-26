@@ -40,17 +40,27 @@ Sync timer data from the Time Tracking plugin.
 ```
 
 #### POST /api/runelite/skills/
-Sync player skill levels.
+Sync player skill levels, XP, total level, and combat level.
 
 **Payload:**
 ```json
 {
   "player": "TestPlayer",
+  "total_level": 1500,
+  "combat_level": 95,
   "skills": {
-    "Attack": 75,
-    "Defence": 70,
-    "Strength": 80,
-    "Hitpoints": 72
+    "Attack": {
+      "level": 75,
+      "current_xp": 1200000
+    },
+    "Defence": {
+      "level": 70,
+      "current_xp": 800000
+    },
+    "Strength": {
+      "level": 80,
+      "current_xp": 2000000
+    }
   }
 }
 ```
@@ -58,6 +68,9 @@ Sync player skill levels.
 **Notes:**
 - Skill names must match the exact names from `net.runelite.api.Skill.getName()`
 - All 23+ OSRS skills should be included in the sync
+- `total_level`: Sum of all skill levels
+- `combat_level`: Player's combat level from `Player.getCombatLevel()`
+- `current_xp`: Experience points for each skill from `Client.getSkillExperience()`
 - Creates player account if it doesn't exist
 - Updates skill records by player + skill name
 
