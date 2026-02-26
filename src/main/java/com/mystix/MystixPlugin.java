@@ -4,9 +4,11 @@ import com.google.inject.Provides;
 import javax.inject.Inject;
 import javax.swing.SwingUtilities;
 import lombok.extern.slf4j.Slf4j;
+import net.runelite.api.ChatMessageType;
 import net.runelite.api.Client;
 import net.runelite.api.GameState;
 import net.runelite.api.Player;
+import net.runelite.api.events.ChatMessage;
 import net.runelite.api.events.GameStateChanged;
 import net.runelite.client.Notifier;
 import net.runelite.client.config.ConfigManager;
@@ -136,6 +138,23 @@ public class MystixPlugin extends Plugin
 				womSyncService.updatePlayer(lastUsername);
 				lastUsername = null;
 			}
+		}
+	}
+
+	private static final String TEARS_CAVE_MESSAGE =
+		"Your stories have entertained me. I will let you into the cave for a short time.";
+
+	@Subscribe
+	public void onChatMessage(ChatMessage event)
+	{
+		if (event.getType() != ChatMessageType.GAMEMESSAGE && event.getType() != ChatMessageType.DIALOG)
+		{
+			return;
+		}
+		String msg = event.getMessage();
+		if (msg != null && msg.contains(TEARS_CAVE_MESSAGE))
+		{
+			timerMonitor.onTearsOfGuthixCompleted();
 		}
 	}
 

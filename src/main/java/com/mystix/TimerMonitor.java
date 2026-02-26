@@ -4,6 +4,8 @@ import com.mystix.api.MystixApiClient;
 import com.mystix.model.TimerSyncItem;
 import com.mystix.model.TimersSyncPayload;
 import java.time.Instant;
+import java.time.ZoneOffset;
+import java.time.ZonedDateTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.ScheduledExecutorService;
@@ -45,6 +47,7 @@ public class TimerMonitor {
 	private com.mystix.runelite.farming.FarmingWorld farmingWorld;
 	private ScheduledFuture<?> scheduledFuture;
 	private String lastSentSnapshot;
+	private volatile Instant tearsOfGuthixNextReset = null;
 
 	@Inject
 	public TimerMonitor(
@@ -86,7 +89,22 @@ public class TimerMonitor {
 			scheduledFuture = null;
 		}
 		lastSentSnapshot = null;
+		tearsOfGuthixNextReset = null;
 		log.debug("TimerMonitor stopped");
+	}
+
+	/**
+	 * Called when the player enters the Tears of Guthix cave.
+	 * ToG is playable again 7 days after completion. Reset is rounded down to
+	 * the nearest day (00:00 UTC) for a clean weekly boundary.
+	 */
+	public void onTearsOfGuthixCompleted() {
+		ZonedDateTime nowUtc = Instant.now().atZone(ZoneOffset.UTC);
+		ZonedDateTime completionDayStart = nowUtc.toLocalDate().atStartOfDay(ZoneOffset.UTC);
+		Instant nextReset = completionDayStart.plusDays(7).toInstant();
+		tearsOfGuthixNextReset = nextReset;
+		lastSentSnapshot = null; // force sync on next tick
+		log.info("Tears of Guthix completed; next reset at {}", tearsOfGuthixNextReset);
 	}
 
 	private void sync() {
@@ -164,6 +182,18 @@ public class TimerMonitor {
 						notificationsEnabled,
 						playerUsername));
 			}
+		}
+
+		// Tears of Guthix — playable again 7 days after completion; timer set when player enters cave
+		Instant togReset = tearsOfGuthixNextReset;
+		if (togReset != null && togReset.isAfter(Instant.now())) {
+			timers.add(new TimerSyncItem(
+					"tears of guthix",
+					"tears of guthix",
+					"tears of guthix",
+					togReset,
+					notificationsEnabled,
+					playerUsername));
 		}
 
 		String snapshot = TimersSyncPayload.toJson(timers);
