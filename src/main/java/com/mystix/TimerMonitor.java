@@ -117,7 +117,6 @@ public class TimerMonitor {
 		birdHouseTracker.updateCompletionTime();
 		farmingTracker.updateCompletionTime();
 
-		long now = Instant.now().getEpochSecond();
 		boolean notificationsEnabled = config.syncTimeTracking();
 		List<TimerSyncItem> timers = new ArrayList<>();
 
@@ -132,7 +131,7 @@ public class TimerMonitor {
 					continue;
 				}
 				long doneEstimate = prediction.getDoneEstimate();
-				if (doneEstimate <= 0 || doneEstimate <= now) {
+				if (doneEstimate <= 0) {
 					continue;
 				}
 				String regionName = patch.getRegion().getName();
@@ -156,7 +155,7 @@ public class TimerMonitor {
 		// Bird houses
 		if (birdHouseTracker.getSummary() == SummaryState.IN_PROGRESS) {
 			long completionTime = birdHouseTracker.getCompletionTime();
-			if (completionTime > 0 && completionTime > now) {
+			if (completionTime > 0) {
 				timers.add(new TimerSyncItem(
 						"bird house",
 						"fossil island",

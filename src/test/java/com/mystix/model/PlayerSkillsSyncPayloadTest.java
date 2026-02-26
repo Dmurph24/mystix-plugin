@@ -9,11 +9,9 @@ import java.util.Map;
 
 import static org.junit.Assert.*;
 
-public class PlayerSkillsSyncPayloadTest
-{
+public class PlayerSkillsSyncPayloadTest {
 	@Test
-	public void testPayloadCreation()
-	{
+	public void testPayloadCreation() {
 		Map<String, PlayerSkillsSyncPayload.SkillData> skills = new HashMap<>();
 		skills.put("Attack", new PlayerSkillsSyncPayload.SkillData(75, 1200000));
 		skills.put("Defence", new PlayerSkillsSyncPayload.SkillData(70, 800000));
@@ -30,8 +28,7 @@ public class PlayerSkillsSyncPayloadTest
 	}
 
 	@Test
-	public void testJsonSerialization()
-	{
+	public void testJsonSerialization() {
 		Map<String, PlayerSkillsSyncPayload.SkillData> skills = new HashMap<>();
 		skills.put("Attack", new PlayerSkillsSyncPayload.SkillData(75, 1200000));
 		skills.put("Defence", new PlayerSkillsSyncPayload.SkillData(70, 800000));
@@ -60,8 +57,7 @@ public class PlayerSkillsSyncPayloadTest
 	}
 
 	@Test
-	public void testEmptySkills()
-	{
+	public void testEmptySkills() {
 		Map<String, PlayerSkillsSyncPayload.SkillData> skills = new HashMap<>();
 		PlayerSkillsSyncPayload payload = new PlayerSkillsSyncPayload("EmptyPlayer", skills, 0, 3);
 
@@ -72,10 +68,9 @@ public class PlayerSkillsSyncPayloadTest
 	}
 
 	@Test
-	public void testSkillDataCreation()
-	{
+	public void testSkillDataCreation() {
 		PlayerSkillsSyncPayload.SkillData skillData = new PlayerSkillsSyncPayload.SkillData(99, 13034431);
-		
+
 		assertEquals(99, skillData.getLevel());
 		assertEquals(13034431, skillData.getCurrentXp());
 	}

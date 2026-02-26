@@ -16,28 +16,26 @@ import static org.junit.Assert.assertTrue;
 /**
  * Tests that MystixApiClient handles config correctly and payload structure.
  */
-public class MystixApiClientTest
-{
-	private static MystixConfig emptyKeyConfig()
-	{
+public class MystixApiClientTest {
+	private static MystixConfig emptyKeyConfig() {
 		com.mystix.TestMystixConfig c = new com.mystix.TestMystixConfig();
 		c.setMystixAppKey("");
 		return c;
 	}
 
 	@Test
-	public void testSendWithEmptyAppKeyDoesNotThrow()
-	{
+	public void testSendWithEmptyAppKeyDoesNotThrow() {
 		MystixApiClient client = new MystixApiClient(emptyKeyConfig());
-		TimerSyncItem item = new TimerSyncItem("bird house", "fossil island", "bird house", Instant.ofEpochSecond(1700000000L), true, "TestPlayer");
+		TimerSyncItem item = new TimerSyncItem("bird house", "fossil island", "bird house",
+				Instant.ofEpochSecond(1700000000L), true, "TestPlayer");
 		client.sendTimersSync(Collections.singletonList(item));
 		// Should not throw; with empty key it returns early
 	}
 
 	@Test
-	public void testPayloadStructure()
-	{
-		TimerSyncItem item = new TimerSyncItem("tree", "farming guild", "Oak tree", Instant.ofEpochSecond(1700000000L), true, "TestPlayer");
+	public void testPayloadStructure() {
+		TimerSyncItem item = new TimerSyncItem("tree", "farming guild", "Oak tree", Instant.ofEpochSecond(1700000000L),
+				true, "TestPlayer");
 		String json = TimersSyncPayload.toJson(Collections.singletonList(item));
 		assertNotNull(json);
 		assertTrue(json.contains("\"timers\""));
@@ -50,8 +48,7 @@ public class MystixApiClientTest
 	}
 
 	@Test
-	public void testSendPlayerSkillsWithEmptyAppKeyDoesNotThrow()
-	{
+	public void testSendPlayerSkillsWithEmptyAppKeyDoesNotThrow() {
 		MystixApiClient client = new MystixApiClient(emptyKeyConfig());
 		Map<String, PlayerSkillsSyncPayload.SkillData> skills = new HashMap<>();
 		skills.put("Attack", new PlayerSkillsSyncPayload.SkillData(75, 1200000));
@@ -62,8 +59,7 @@ public class MystixApiClientTest
 	}
 
 	@Test
-	public void testPlayerSkillsPayloadStructure()
-	{
+	public void testPlayerSkillsPayloadStructure() {
 		Map<String, PlayerSkillsSyncPayload.SkillData> skills = new HashMap<>();
 		skills.put("Attack", new PlayerSkillsSyncPayload.SkillData(75, 1200000));
 		skills.put("Defence", new PlayerSkillsSyncPayload.SkillData(70, 800000));
@@ -74,10 +70,10 @@ public class MystixApiClientTest
 		assertNotNull(json);
 		assertTrue(json.contains("\"player\":\"TestPlayer\""));
 		assertTrue(json.contains("\"skills\""));
-		assertTrue(json.contains("\"total_level\":225"));
-		assertTrue(json.contains("\"combat_level\":95"));
+		/* API expects skills as {"SkillName": level} integers */
 		assertTrue(json.contains("Attack"));
-		assertTrue(json.contains("\"level\":75"));
-		assertTrue(json.contains("\"current_xp\":1200000"));
+		assertTrue(json.contains("\"Attack\":75"));
+		assertTrue(json.contains("\"Defence\":70"));
+		assertTrue(json.contains("\"Strength\":80"));
 	}
 }
