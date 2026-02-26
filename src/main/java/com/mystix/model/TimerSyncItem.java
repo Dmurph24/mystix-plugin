@@ -1,6 +1,7 @@
 package com.mystix.model;
 
 import java.time.Instant;
+import javax.annotation.Nullable;
 import lombok.Value;
 
 /**
@@ -15,6 +16,9 @@ public class TimerSyncItem
 	String region;
 	String entity;
 	Instant completedAt;
+	/** When the timer started (e.g. crop planted, bird house seeded). Null if unknown. */
+	@Nullable
+	Instant startedAt;
 	boolean notificationsEnabled;
 	String playerUsername;
 
@@ -39,7 +43,12 @@ public class TimerSyncItem
 			.append("\",\"region\":\"").append(escapeJson(toApiFormat(region)))
 			.append("\",\"entity\":\"").append(escapeJson(toApiFormat(entity)))
 			.append("\",\"completed_at\":\"").append(completedAt.toString())
-			.append("\",\"notifications_enabled\":").append(notificationsEnabled)
+			.append("\"");
+		if (startedAt != null)
+		{
+			sb.append(",\"started_at\":\"").append(startedAt.toString()).append("\"");
+		}
+		sb.append(",\"notifications_enabled\":").append(notificationsEnabled)
 			.append(",\"player_username\":\"").append(escapeJson(toApiFormat(playerUsername)))
 			.append("\"}");
 	}

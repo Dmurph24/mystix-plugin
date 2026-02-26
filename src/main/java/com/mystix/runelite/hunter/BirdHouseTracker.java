@@ -48,7 +48,7 @@ import net.runelite.client.plugins.timetracking.TimeTrackingConfig;
 public class BirdHouseTracker
 {
 	// average time taken to harvest 10 birds, in seconds
-	static final int BIRD_HOUSE_DURATION = (int) Duration.ofMinutes(50).getSeconds();
+	public static final int BIRD_HOUSE_DURATION = (int) Duration.ofMinutes(50).getSeconds();
 
 	private static ImmutableSet<Integer> FOSSIL_ISLAND_REGIONS = ImmutableSet.of(14650, 14651, 14652, 14906, 14907, 15162, 15163);
 

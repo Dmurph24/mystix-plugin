@@ -48,6 +48,7 @@ public class TimerMonitor {
 	private ScheduledFuture<?> scheduledFuture;
 	private String lastSentSnapshot;
 	private volatile Instant tearsOfGuthixNextReset = null;
+	private volatile Instant tearsOfGuthixCompletedAt = null;
 
 	@Inject
 	public TimerMonitor(
@@ -90,6 +91,7 @@ public class TimerMonitor {
 		}
 		lastSentSnapshot = null;
 		tearsOfGuthixNextReset = null;
+		tearsOfGuthixCompletedAt = null;
 		log.debug("TimerMonitor stopped");
 	}
 
@@ -99,10 +101,12 @@ public class TimerMonitor {
 	 * the nearest day (00:00 UTC) for a clean weekly boundary.
 	 */
 	public void onTearsOfGuthixCompleted() {
-		ZonedDateTime nowUtc = Instant.now().atZone(ZoneOffset.UTC);
+		Instant now = Instant.now();
+		ZonedDateTime nowUtc = now.atZone(ZoneOffset.UTC);
 		ZonedDateTime completionDayStart = nowUtc.toLocalDate().atStartOfDay(ZoneOffset.UTC);
 		Instant nextReset = completionDayStart.plusDays(7).toInstant();
 		tearsOfGuthixNextReset = nextReset;
+		tearsOfGuthixCompletedAt = now;
 		lastSentSnapshot = null; // force sync on next tick
 		log.info("Tears of Guthix completed; next reset at {}", tearsOfGuthixNextReset);
 	}
@@ -160,25 +164,34 @@ public class TimerMonitor {
 				if (tabName == null || tabName.isBlank()) {
 					tabName = entry.getKey().name().toLowerCase();
 				}
+				int tickRate = prediction.getProduce().getTickrate();
+				Instant farmingStartedAt = null;
+				if (tickRate > 0 && prediction.getStages() > 1) {
+					long totalGrowthSeconds = (long) (prediction.getStages() - 1) * tickRate * 60;
+					farmingStartedAt = Instant.ofEpochSecond(doneEstimate - totalGrowthSeconds);
+				}
 				timers.add(new TimerSyncItem(
 						tabName,
 						regionName,
 						prediction.getProduce().getName(),
 						Instant.ofEpochSecond(doneEstimate),
+						farmingStartedAt,
 						notificationsEnabled,
 						playerUsername));
 			}
 		}
 
-		// Bird houses
+		// Bird houses — started_at is when the latest bird house was seeded (completionTime - 50 min duration)
 		if (birdHouseTracker.getSummary() == SummaryState.IN_PROGRESS) {
 			long completionTime = birdHouseTracker.getCompletionTime();
 			if (completionTime > 0) {
+				Instant birdHouseStartedAt = Instant.ofEpochSecond(completionTime - BirdHouseTracker.BIRD_HOUSE_DURATION);
 				timers.add(new TimerSyncItem(
 						"bird house",
 						"fossil island",
 						"bird house",
 						Instant.ofEpochSecond(completionTime),
+						birdHouseStartedAt,
 						notificationsEnabled,
 						playerUsername));
 			}
@@ -192,6 +205,7 @@ public class TimerMonitor {
 					"tears of guthix",
 					"tears of guthix",
 					togReset,
+					tearsOfGuthixCompletedAt,
 					notificationsEnabled,
 					playerUsername));
 		}
