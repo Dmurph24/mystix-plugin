@@ -1,10 +1,13 @@
 package com.mystix.api;
 
 import com.mystix.MystixConfig;
+import com.mystix.model.PlayerSkillsSyncPayload;
 import com.mystix.model.TimerSyncItem;
 import com.mystix.model.TimersSyncPayload;
 import java.time.Instant;
 import java.util.Collections;
+import java.util.HashMap;
+import java.util.Map;
 import org.junit.Test;
 
 import static org.junit.Assert.assertNotNull;
@@ -44,5 +47,37 @@ public class MystixApiClientTest
 		assertTrue(json.contains("\"completed_at\""));
 		assertTrue(json.contains("\"notifications_enabled\":true"));
 		assertTrue(json.contains("\"player_username\":\"testplayer\""));
+	}
+
+	@Test
+	public void testSendPlayerSkillsWithEmptyAppKeyDoesNotThrow()
+	{
+		MystixApiClient client = new MystixApiClient(emptyKeyConfig());
+		Map<String, PlayerSkillsSyncPayload.SkillData> skills = new HashMap<>();
+		skills.put("Attack", new PlayerSkillsSyncPayload.SkillData(75, 1200000));
+		skills.put("Defence", new PlayerSkillsSyncPayload.SkillData(70, 800000));
+		PlayerSkillsSyncPayload payload = new PlayerSkillsSyncPayload("TestPlayer", skills, 145, 85);
+		client.sendPlayerSkillsSync(payload);
+		// Should not throw; with empty key it returns early
+	}
+
+	@Test
+	public void testPlayerSkillsPayloadStructure()
+	{
+		Map<String, PlayerSkillsSyncPayload.SkillData> skills = new HashMap<>();
+		skills.put("Attack", new PlayerSkillsSyncPayload.SkillData(75, 1200000));
+		skills.put("Defence", new PlayerSkillsSyncPayload.SkillData(70, 800000));
+		skills.put("Strength", new PlayerSkillsSyncPayload.SkillData(80, 2000000));
+		PlayerSkillsSyncPayload payload = new PlayerSkillsSyncPayload("TestPlayer", skills, 225, 95);
+		String json = payload.toJson();
+
+		assertNotNull(json);
+		assertTrue(json.contains("\"player\":\"TestPlayer\""));
+		assertTrue(json.contains("\"skills\""));
+		assertTrue(json.contains("\"total_level\":225"));
+		assertTrue(json.contains("\"combat_level\":95"));
+		assertTrue(json.contains("Attack"));
+		assertTrue(json.contains("\"level\":75"));
+		assertTrue(json.contains("\"current_xp\":1200000"));
 	}
 }

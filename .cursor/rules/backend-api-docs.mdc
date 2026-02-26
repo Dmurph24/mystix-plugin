@@ -1,0 +1,86 @@
+# Backend API Documentation
+
+## Finding API Documentation
+
+The Mystix backend API documentation is maintained as an Insomnia collection. When implementing new API integrations:
+
+1. Request the `insomnia_collection.json` file from the backend repository or team
+2. The collection contains all API endpoints with:
+   - Request methods and URLs
+   - Required headers (e.g., `X-RuneLite-Key` for RuneLite endpoints)
+   - Request/response payload formats
+   - Example payloads
+
+## API Endpoints for RuneLite Plugin
+
+### Base URL
+- Production: `https://api.mystix.app`
+- Local development: `http://localhost:8000`
+
+### Authentication
+All RuneLite API endpoints use the `X-RuneLite-Key` header for authentication. The key is obtained from the Mystix app and configured in the plugin settings.
+
+### Key Endpoints
+
+#### POST /api/runelite/timers/
+Sync timer data from the Time Tracking plugin.
+
+**Payload:**
+```json
+{
+  "timers": [{
+    "timer_type": "tree",
+    "region": "farming guild",
+    "entity": "Oak tree",
+    "completed_at": "2025-02-21T14:30:00Z",
+    "notifications_enabled": true,
+    "player_username": "TestPlayer"
+  }]
+}
+```
+
+#### POST /api/runelite/skills/
+Sync player skill levels, XP, total level, and combat level.
+
+**Payload:**
+```json
+{
+  "player": "TestPlayer",
+  "total_level": 1500,
+  "combat_level": 95,
+  "skills": {
+    "Attack": {
+      "level": 75,
+      "current_xp": 1200000
+    },
+    "Defence": {
+      "level": 70,
+      "current_xp": 800000
+    },
+    "Strength": {
+      "level": 80,
+      "current_xp": 2000000
+    }
+  }
+}
+```
+
+**Notes:**
+- Skill names must match the exact names from `net.runelite.api.Skill.getName()`
+- All 23+ OSRS skills should be included in the sync
+- `total_level`: Sum of all skill levels
+- `combat_level`: Player's combat level from `Player.getCombatLevel()`
+- `current_xp`: Experience points for each skill from `Client.getSkillExperience()`
+- Creates player account if it doesn't exist
+- Updates skill records by player + skill name
+
+## Implementation Pattern
+
+When adding a new API sync feature:
+1. Add a config toggle (e.g., `syncPlayerSkills`) to `MystixConfig`
+2. Create a payload model class in `com.mystix.model`
+3. Add an API method to `MystixApiClient`
+4. Create a monitor class to detect events and trigger syncs
+5. Integrate the monitor in `MystixPlugin.startUp()` and `shutDown()`
+6. Write tests without external dependencies (no Mockito)
+7. Update README.md with the new feature

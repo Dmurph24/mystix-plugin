@@ -1,6 +1,7 @@
 package com.mystix.api;
 
 import com.mystix.MystixConfig;
+import com.mystix.model.PlayerSkillsSyncPayload;
 import com.mystix.model.TimerSyncItem;
 import com.mystix.model.TimersSyncPayload;
 import java.net.URI;
@@ -22,7 +23,8 @@ public class MystixApiClient
 {
 	private static final Duration REQUEST_TIMEOUT = Duration.ofSeconds(10);
 	private static final String API_BASE_URL = "https://api.mystix.app";
-	private static final String ENDPOINT_PATH = "/api/runelite/timers/";
+	private static final String TIMERS_ENDPOINT = "/api/runelite/timers/";
+	private static final String SKILLS_ENDPOINT = "/api/runelite/skills/";
 
 	private final MystixConfig config;
 	private final HttpClient httpClient;
@@ -49,7 +51,7 @@ public class MystixApiClient
 			return;
 		}
 
-		String url = API_BASE_URL.replaceAll("/$", "") + ENDPOINT_PATH;
+		String url = API_BASE_URL.replaceAll("/$", "") + TIMERS_ENDPOINT;
 		String json = TimersSyncPayload.toJson(timers);
 
 		try
@@ -83,6 +85,56 @@ public class MystixApiClient
 		catch (Exception e)
 		{
 			log.warn("Failed to send timers sync: {}", e.getMessage());
+		}
+	}
+
+	/**
+	 * Sends player skills sync to the Mystix API. Runs asynchronously to avoid blocking.
+	 * Logs errors without affecting RuneLite stability.
+	 */
+	public void sendPlayerSkillsSync(PlayerSkillsSyncPayload payload)
+	{
+		String appKey = config.mystixAppKey();
+		if (appKey == null || appKey.isBlank())
+		{
+			log.debug("Skipping player skills sync: no Mystix App Key configured");
+			return;
+		}
+
+		String url = API_BASE_URL.replaceAll("/$", "") + SKILLS_ENDPOINT;
+		String json = payload.toJson();
+
+		try
+		{
+			HttpRequest request = HttpRequest.newBuilder()
+				.uri(URI.create(url))
+				.header("Content-Type", "application/json")
+				.header("X-RuneLite-Key", appKey.trim())
+				.timeout(REQUEST_TIMEOUT)
+				.POST(HttpRequest.BodyPublishers.ofString(json))
+				.build();
+
+			httpClient.sendAsync(request, HttpResponse.BodyHandlers.ofString())
+				.thenAccept(response ->
+				{
+					if (response.statusCode() >= 200 && response.statusCode() < 300)
+					{
+						log.info("Mystix player skills sync successful for player: {}", payload.getPlayer());
+					}
+					else
+					{
+						log.warn("Mystix API returned {} for skills sync: {}", response.statusCode(), response.body());
+					}
+				})
+				.exceptionally(ex ->
+				{
+					log.warn("Failed to send player skills sync to Mystix API: {}", ex.getMessage());
+					return null;
+				});
+		}
+		catch (Exception e)
+		{
+			log.warn("Failed to send player skills sync: {}", e.getMessage());
 		}
 	}
 }
