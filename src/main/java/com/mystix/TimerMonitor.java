@@ -3,7 +3,11 @@ package com.mystix;
 import com.mystix.api.MystixApiClient;
 import com.mystix.model.TimerSyncItem;
 import com.mystix.model.TimersSyncPayload;
+import java.time.DayOfWeek;
 import java.time.Instant;
+import java.time.ZoneOffset;
+import java.time.ZonedDateTime;
+import java.time.temporal.TemporalAdjusters;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.ScheduledExecutorService;
@@ -45,6 +49,7 @@ public class TimerMonitor {
 	private com.mystix.runelite.farming.FarmingWorld farmingWorld;
 	private ScheduledFuture<?> scheduledFuture;
 	private String lastSentSnapshot;
+	private volatile Instant tearsOfGuthixNextReset = null;
 
 	@Inject
 	public TimerMonitor(
@@ -86,7 +91,23 @@ public class TimerMonitor {
 			scheduledFuture = null;
 		}
 		lastSentSnapshot = null;
+		tearsOfGuthixNextReset = null;
 		log.debug("TimerMonitor stopped");
+	}
+
+	/**
+	 * Called when the player enters the Tears of Guthix cave.
+	 * Calculates the next OSRS weekly reset (Wednesday 00:00 UTC) and stores
+	 * it so the next sync includes a ToG timer.
+	 */
+	public void onTearsOfGuthixCompleted() {
+		ZonedDateTime now = ZonedDateTime.now(ZoneOffset.UTC);
+		ZonedDateTime nextReset = now
+			.with(TemporalAdjusters.next(DayOfWeek.WEDNESDAY))
+			.withHour(0).withMinute(0).withSecond(0).withNano(0);
+		tearsOfGuthixNextReset = nextReset.toInstant();
+		lastSentSnapshot = null; // force sync on next tick
+		log.info("Tears of Guthix completed; next reset at {}", tearsOfGuthixNextReset);
 	}
 
 	private void sync() {
@@ -164,6 +185,18 @@ public class TimerMonitor {
 						notificationsEnabled,
 						playerUsername));
 			}
+		}
+
+		// Tears of Guthix — weekly minigame; timer is set when the player enters the cave
+		Instant togReset = tearsOfGuthixNextReset;
+		if (togReset != null && togReset.isAfter(Instant.now())) {
+			timers.add(new TimerSyncItem(
+					"tears of guthix",
+					"tears of guthix",
+					"tears of guthix",
+					togReset,
+					notificationsEnabled,
+					playerUsername));
 		}
 
 		String snapshot = TimersSyncPayload.toJson(timers);
