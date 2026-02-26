@@ -17,6 +17,8 @@ import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.Client;
 import net.runelite.api.GameState;
 import net.runelite.api.Player;
+import net.runelite.client.config.ConfigManager;
+import net.runelite.client.plugins.timetracking.TimeTrackingConfig;
 import net.runelite.client.plugins.timetracking.SummaryState;
 import com.mystix.runelite.farming.FarmingPatch;
 import com.mystix.runelite.farming.FarmingTracker;
@@ -40,6 +42,7 @@ public class TimerMonitor {
 	private final Client client;
 	private final MystixConfig config;
 	private final MystixApiClient apiClient;
+	private final ConfigManager configManager;
 	private final ScheduledExecutorService executorService;
 
 	private FarmingTracker farmingTracker;
@@ -54,10 +57,12 @@ public class TimerMonitor {
 			Client client,
 			MystixConfig config,
 			MystixApiClient apiClient,
+			ConfigManager configManager,
 			ScheduledExecutorService executorService) {
 		this.client = client;
 		this.config = config;
 		this.apiClient = apiClient;
+		this.configManager = configManager;
 		this.executorService = executorService;
 	}
 
@@ -135,10 +140,11 @@ public class TimerMonitor {
 		birdHouseTracker.updateCompletionTime();
 		farmingTracker.updateCompletionTime();
 
-		boolean notificationsEnabled = config.syncTimeTracking();
+		boolean syncEnabled = config.syncTimeTracking();
 		List<TimerSyncItem> timers = new ArrayList<>();
 
 		// Per-patch timers with readable names (e.g. "Farming Guild", "Catherby")
+		// Each patch has its own bell/notification toggle in the Time Tracking panel
 		for (var entry : farmingWorld.getTabs().entrySet()) {
 			for (FarmingPatch patch : entry.getValue()) {
 				PatchPrediction prediction = farmingTracker.predictPatch(patch);
@@ -152,6 +158,7 @@ public class TimerMonitor {
 				if (doneEstimate <= 0) {
 					continue;
 				}
+				boolean notificationsEnabled = syncEnabled && isFarmingNotifyEnabled(patch);
 				String regionName = patch.getRegion().getName();
 				if (regionName == null || regionName.isBlank()) {
 					regionName = entry.getKey().name().toLowerCase();
@@ -170,21 +177,37 @@ public class TimerMonitor {
 			}
 		}
 
+<<<<<<< Updated upstream
 		// Bird houses
 		if (birdHouseTracker.getSummary() == SummaryState.IN_PROGRESS) {
 			long completionTime = birdHouseTracker.getCompletionTime();
 			if (completionTime > 0) {
+=======
+		// Bird houses — started_at is when the latest bird house was seeded (completionTime - 50 min duration)
+		// Bird houses have a single notify toggle in Time Tracking
+		if (birdHouseTracker.getSummary() == SummaryState.IN_PROGRESS) {
+			long completionTime = birdHouseTracker.getCompletionTime();
+			if (completionTime > 0) {
+				boolean birdHouseNotify = syncEnabled && isBirdHouseNotifyEnabled();
+				Instant birdHouseStartedAt = Instant.ofEpochSecond(completionTime - BirdHouseTracker.BIRD_HOUSE_DURATION);
+>>>>>>> Stashed changes
 				timers.add(new TimerSyncItem(
 						"bird house",
 						"fossil island",
 						"bird house",
 						Instant.ofEpochSecond(completionTime),
+<<<<<<< Updated upstream
 						notificationsEnabled,
+=======
+						birdHouseStartedAt,
+						birdHouseNotify,
+>>>>>>> Stashed changes
 						playerUsername));
 			}
 		}
 
 		// Tears of Guthix — playable again 7 days after completion; timer set when player enters cave
+		// No per-timer bell in RuneLite; use sync master switch
 		Instant togReset = tearsOfGuthixNextReset;
 		if (togReset != null && togReset.isAfter(Instant.now())) {
 			timers.add(new TimerSyncItem(
@@ -192,7 +215,12 @@ public class TimerMonitor {
 					"tears of guthix",
 					"tears of guthix",
 					togReset,
+<<<<<<< Updated upstream
 					notificationsEnabled,
+=======
+					tearsOfGuthixCompletedAt,
+					syncEnabled,
+>>>>>>> Stashed changes
 					playerUsername));
 		}
 
@@ -202,5 +230,22 @@ public class TimerMonitor {
 			log.info("Mystix syncing {} timer(s) for {}", timers.size(), playerUsername);
 			apiClient.sendTimersSync(timers);
 		}
+	}
+
+	/**
+	 * Reads the per-patch notification setting (bell icon) from Time Tracking config.
+	 * Config key format matches FarmingPatch.notifyConfigKey().
+	 */
+	private boolean isFarmingNotifyEnabled(FarmingPatch patch) {
+		String notifyKey = TimeTrackingConfig.NOTIFY + "." + patch.getRegion().getRegionID() + "." + patch.getVarbit();
+		String profileKey = configManager.getRSProfileKey();
+		return Boolean.TRUE.equals(configManager.getConfiguration(TimeTrackingConfig.CONFIG_GROUP, profileKey, notifyKey, Boolean.class));
+	}
+
+	/**
+	 * Reads the bird house notification toggle from Time Tracking config.
+	 */
+	private boolean isBirdHouseNotifyEnabled() {
+		return Boolean.TRUE.equals(configManager.getRSProfileConfiguration(TimeTrackingConfig.CONFIG_GROUP, TimeTrackingConfig.BIRDHOUSE_NOTIFY, boolean.class));
 	}
 }
