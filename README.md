@@ -13,12 +13,16 @@ A RuneLite plugin that syncs Time Tracking data to the Mystix app. Sends expecte
 Each source plugin has an on/off toggle. Enable only the plugins you want synced to Mystix:
 
 - **Sync Time Tracking** — Sync farming patches and bird houses to Mystix (default: on)
+- **Sync Player Skills** — Sync player skills and levels when logging in or out (default: on)
 
 ## Features
 
 - **Time Tracking sync** — Sends expected finish timestamps for farming patches and bird houses to the Mystix server
-- The Mystix server uses these timestamps to schedule notifications when your timers complete (e.g., when a farming patch is ready to harvest)
-- Requires the RuneLite **Time Tracking** plugin to be enabled
+  - The Mystix server uses these timestamps to schedule notifications when your timers complete (e.g., when a farming patch is ready to harvest)
+  - Requires the RuneLite **Time Tracking** plugin to be enabled
+- **Player Skills sync** — Sends all player skill levels to the Mystix server when logging in or out
+  - Allows the Mystix app to display and track your character's skill progression
+  - Automatically syncs on login and logout events
 
 ## Building
 

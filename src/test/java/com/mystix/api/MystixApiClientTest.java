@@ -1,10 +1,13 @@
 package com.mystix.api;
 
 import com.mystix.MystixConfig;
+import com.mystix.model.PlayerSkillsSyncPayload;
 import com.mystix.model.TimerSyncItem;
 import com.mystix.model.TimersSyncPayload;
 import java.time.Instant;
 import java.util.Collections;
+import java.util.HashMap;
+import java.util.Map;
 import org.junit.Test;
 
 import static org.junit.Assert.assertNotNull;
@@ -44,5 +47,35 @@ public class MystixApiClientTest
 		assertTrue(json.contains("\"completed_at\""));
 		assertTrue(json.contains("\"notifications_enabled\":true"));
 		assertTrue(json.contains("\"player_username\":\"testplayer\""));
+	}
+
+	@Test
+	public void testSendPlayerSkillsWithEmptyAppKeyDoesNotThrow()
+	{
+		MystixApiClient client = new MystixApiClient(emptyKeyConfig());
+		Map<String, Integer> skills = new HashMap<>();
+		skills.put("Attack", 75);
+		skills.put("Defence", 70);
+		PlayerSkillsSyncPayload payload = new PlayerSkillsSyncPayload("TestPlayer", skills);
+		client.sendPlayerSkillsSync(payload);
+		// Should not throw; with empty key it returns early
+	}
+
+	@Test
+	public void testPlayerSkillsPayloadStructure()
+	{
+		Map<String, Integer> skills = new HashMap<>();
+		skills.put("Attack", 75);
+		skills.put("Defence", 70);
+		skills.put("Strength", 80);
+		PlayerSkillsSyncPayload payload = new PlayerSkillsSyncPayload("TestPlayer", skills);
+		String json = payload.toJson();
+
+		assertNotNull(json);
+		assertTrue(json.contains("\"player\":\"TestPlayer\""));
+		assertTrue(json.contains("\"skills\""));
+		assertTrue(json.contains("\"Attack\":75"));
+		assertTrue(json.contains("\"Defence\":70"));
+		assertTrue(json.contains("\"Strength\":80"));
 	}
 }

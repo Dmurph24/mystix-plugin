@@ -31,6 +31,9 @@ public class MystixPlugin extends Plugin
 	private TimerMonitor timerMonitor;
 
 	@Inject
+	private PlayerSkillsMonitor playerSkillsMonitor;
+
+	@Inject
 	private Notifier notifier;
 
 	@Inject
@@ -69,6 +72,8 @@ public class MystixPlugin extends Plugin
 		timerMonitor.initialize(farmingTracker, birdHouseTracker, farmingWorld);
 		timerMonitor.start();
 
+		playerSkillsMonitor.start();
+
 		SwingUtilities.invokeLater(() -> notifier.notify(
 				"Mystix syncs enabled plugins to the external Mystix server outside of RuneLite. Disable any plugins in Configuration > Mystix you don't want synced to your app."
 		));
@@ -78,6 +83,7 @@ public class MystixPlugin extends Plugin
 	protected void shutDown() throws Exception
 	{
 		timerMonitor.stop();
+		playerSkillsMonitor.stop();
 		log.debug("Mystix stopped");
 	}
 
