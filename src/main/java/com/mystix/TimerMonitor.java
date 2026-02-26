@@ -3,11 +3,9 @@ package com.mystix;
 import com.mystix.api.MystixApiClient;
 import com.mystix.model.TimerSyncItem;
 import com.mystix.model.TimersSyncPayload;
-import java.time.DayOfWeek;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.time.ZonedDateTime;
-import java.time.temporal.TemporalAdjusters;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.ScheduledExecutorService;
@@ -97,15 +95,14 @@ public class TimerMonitor {
 
 	/**
 	 * Called when the player enters the Tears of Guthix cave.
-	 * Calculates the next OSRS weekly reset (Wednesday 00:00 UTC) and stores
-	 * it so the next sync includes a ToG timer.
+	 * ToG is playable again 7 days after completion. Reset is rounded down to
+	 * the nearest day (00:00 UTC) for a clean weekly boundary.
 	 */
 	public void onTearsOfGuthixCompleted() {
-		ZonedDateTime now = ZonedDateTime.now(ZoneOffset.UTC);
-		ZonedDateTime nextReset = now
-			.with(TemporalAdjusters.next(DayOfWeek.WEDNESDAY))
-			.withHour(0).withMinute(0).withSecond(0).withNano(0);
-		tearsOfGuthixNextReset = nextReset.toInstant();
+		ZonedDateTime nowUtc = Instant.now().atZone(ZoneOffset.UTC);
+		ZonedDateTime completionDayStart = nowUtc.toLocalDate().atStartOfDay(ZoneOffset.UTC);
+		Instant nextReset = completionDayStart.plusDays(7).toInstant();
+		tearsOfGuthixNextReset = nextReset;
 		lastSentSnapshot = null; // force sync on next tick
 		log.info("Tears of Guthix completed; next reset at {}", tearsOfGuthixNextReset);
 	}
@@ -187,7 +184,7 @@ public class TimerMonitor {
 			}
 		}
 
-		// Tears of Guthix — weekly minigame; timer is set when the player enters the cave
+		// Tears of Guthix — playable again 7 days after completion; timer set when player enters cave
 		Instant togReset = tearsOfGuthixNextReset;
 		if (togReset != null && togReset.isAfter(Instant.now())) {
 			timers.add(new TimerSyncItem(
