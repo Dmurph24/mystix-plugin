@@ -70,10 +70,13 @@ public class MystixApiClientTest {
 		assertNotNull(json);
 		assertTrue(json.contains("\"player\":\"TestPlayer\""));
 		assertTrue(json.contains("\"skills\""));
-		/* API expects skills as {"SkillName": level} integers */
+		/* API expects skills as {"SkillName": {"level": N, "current_xp": N}} */
 		assertTrue(json.contains("Attack"));
-		assertTrue(json.contains("\"Attack\":75"));
-		assertTrue(json.contains("\"Defence\":70"));
-		assertTrue(json.contains("\"Strength\":80"));
+		assertTrue(json.contains("\"level\":75"));
+		assertTrue(json.contains("\"level\":70"));
+		assertTrue(json.contains("\"level\":80"));
+		assertTrue(json.contains("\"current_xp\":1200000"));
+		assertTrue(json.contains("\"current_xp\":800000"));
+		assertTrue(json.contains("\"current_xp\":2000000"));
 	}
 }

@@ -7,6 +7,7 @@ import java.time.Instant;
 import java.time.ZoneOffset;
 import java.time.ZonedDateTime;
 import java.util.ArrayList;
+import java.util.EnumSet;
 import java.util.List;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
@@ -17,6 +18,7 @@ import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.Client;
 import net.runelite.api.GameState;
 import net.runelite.api.Player;
+import net.runelite.api.WorldType;
 import net.runelite.client.config.ConfigManager;
 import net.runelite.client.plugins.timetracking.TimeTrackingConfig;
 import net.runelite.client.plugins.timetracking.SummaryState;
@@ -125,6 +127,10 @@ public class TimerMonitor {
 			log.debug("Mystix sync skipped: not logged in");
 			return;
 		}
+		if (isSpecialGameMode()) {
+			log.debug("Mystix sync skipped: special game mode detected (Leagues, DMM, etc.)");
+			return;
+		}
 
 		Player localPlayer = client.getLocalPlayer();
 		String playerUsername = localPlayer != null ? localPlayer.getName() : null;
@@ -177,31 +183,17 @@ public class TimerMonitor {
 			}
 		}
 
-<<<<<<< Updated upstream
-		// Bird houses
-		if (birdHouseTracker.getSummary() == SummaryState.IN_PROGRESS) {
-			long completionTime = birdHouseTracker.getCompletionTime();
-			if (completionTime > 0) {
-=======
-		// Bird houses — started_at is when the latest bird house was seeded (completionTime - 50 min duration)
-		// Bird houses have a single notify toggle in Time Tracking
+		// Bird houses — have a single notify toggle in Time Tracking
 		if (birdHouseTracker.getSummary() == SummaryState.IN_PROGRESS) {
 			long completionTime = birdHouseTracker.getCompletionTime();
 			if (completionTime > 0) {
 				boolean birdHouseNotify = syncEnabled && isBirdHouseNotifyEnabled();
-				Instant birdHouseStartedAt = Instant.ofEpochSecond(completionTime - BirdHouseTracker.BIRD_HOUSE_DURATION);
->>>>>>> Stashed changes
 				timers.add(new TimerSyncItem(
 						"bird house",
 						"fossil island",
 						"bird house",
 						Instant.ofEpochSecond(completionTime),
-<<<<<<< Updated upstream
-						notificationsEnabled,
-=======
-						birdHouseStartedAt,
 						birdHouseNotify,
->>>>>>> Stashed changes
 						playerUsername));
 			}
 		}
@@ -215,12 +207,7 @@ public class TimerMonitor {
 					"tears of guthix",
 					"tears of guthix",
 					togReset,
-<<<<<<< Updated upstream
-					notificationsEnabled,
-=======
-					tearsOfGuthixCompletedAt,
 					syncEnabled,
->>>>>>> Stashed changes
 					playerUsername));
 		}
 
@@ -247,5 +234,15 @@ public class TimerMonitor {
 	 */
 	private boolean isBirdHouseNotifyEnabled() {
 		return Boolean.TRUE.equals(configManager.getRSProfileConfiguration(TimeTrackingConfig.CONFIG_GROUP, TimeTrackingConfig.BIRDHOUSE_NOTIFY, boolean.class));
+	}
+
+	/**
+	 * Checks if the player is on a special game mode world (Leagues, DMM, etc.).
+	 * Special game modes use the same username as the main account but should not sync
+	 * to avoid data conflicts.
+	 */
+	private boolean isSpecialGameMode() {
+		EnumSet<WorldType> worldTypes = client.getWorldType();
+		return worldTypes.contains(WorldType.SEASONAL) || worldTypes.contains(WorldType.DEADMAN);
 	}
 }

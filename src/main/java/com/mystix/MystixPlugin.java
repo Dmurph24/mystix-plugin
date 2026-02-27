@@ -1,6 +1,7 @@
 package com.mystix;
 
 import com.google.inject.Provides;
+import java.util.EnumSet;
 import javax.inject.Inject;
 import javax.swing.SwingUtilities;
 import lombok.extern.slf4j.Slf4j;
@@ -8,6 +9,7 @@ import net.runelite.api.ChatMessageType;
 import net.runelite.api.Client;
 import net.runelite.api.GameState;
 import net.runelite.api.Player;
+import net.runelite.api.WorldType;
 import net.runelite.api.events.ChatMessage;
 import net.runelite.api.events.GameStateChanged;
 import net.runelite.client.Notifier;
@@ -118,6 +120,11 @@ public class MystixPlugin extends Plugin
 		{
 			return;
 		}
+		if (isSpecialGameMode())
+		{
+			log.debug("WOM sync skipped: special game mode detected (Leagues, DMM, etc.)");
+			return;
+		}
 
 		GameState state = event.getGameState();
 
@@ -162,5 +169,16 @@ public class MystixPlugin extends Plugin
 	MystixConfig provideConfig(ConfigManager configManager)
 	{
 		return configManager.getConfig(MystixConfig.class);
+	}
+
+	/**
+	 * Checks if the player is on a special game mode world (Leagues, DMM, etc.).
+	 * Special game modes use the same username as the main account but should not sync
+	 * to avoid data conflicts.
+	 */
+	private boolean isSpecialGameMode()
+	{
+		EnumSet<WorldType> worldTypes = client.getWorldType();
+		return worldTypes.contains(WorldType.SEASONAL) || worldTypes.contains(WorldType.DEADMAN);
 	}
 }

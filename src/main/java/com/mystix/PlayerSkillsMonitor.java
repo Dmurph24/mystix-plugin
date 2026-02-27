@@ -2,6 +2,7 @@ package com.mystix;
 
 import com.mystix.api.MystixApiClient;
 import com.mystix.model.PlayerSkillsSyncPayload;
+import java.util.EnumSet;
 import java.util.HashMap;
 import java.util.Map;
 import javax.inject.Inject;
@@ -11,6 +12,7 @@ import net.runelite.api.Client;
 import net.runelite.api.GameState;
 import net.runelite.api.Player;
 import net.runelite.api.Skill;
+import net.runelite.api.WorldType;
 import net.runelite.api.events.GameStateChanged;
 import net.runelite.client.eventbus.EventBus;
 import net.runelite.client.eventbus.Subscribe;
@@ -84,6 +86,11 @@ public class PlayerSkillsMonitor
 			log.debug("Player skills sync skipped: no App Key configured");
 			return;
 		}
+		if (isSpecialGameMode())
+		{
+			log.debug("Player skills sync skipped: special game mode detected (Leagues, DMM, etc.)");
+			return;
+		}
 
 		Player localPlayer = client.getLocalPlayer();
 		String playerUsername = localPlayer != null ? localPlayer.getName() : null;
@@ -110,5 +117,16 @@ public class PlayerSkillsMonitor
 		log.info("Syncing {} skills for player: {} (Total Level: {}, Combat Level: {})", 
 			skills.size(), playerUsername, totalLevel, combatLevel);
 		apiClient.sendPlayerSkillsSync(payload);
+	}
+
+	/**
+	 * Checks if the player is on a special game mode world (Leagues, DMM, etc.).
+	 * Special game modes use the same username as the main account but should not sync
+	 * to avoid data conflicts.
+	 */
+	private boolean isSpecialGameMode()
+	{
+		EnumSet<WorldType> worldTypes = client.getWorldType();
+		return worldTypes.contains(WorldType.SEASONAL) || worldTypes.contains(WorldType.DEADMAN);
 	}
 }
