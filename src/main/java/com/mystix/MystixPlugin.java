@@ -172,13 +172,20 @@ public class MystixPlugin extends Plugin
 	}
 
 	/**
-	 * Checks if the player is on a special game mode world (Leagues, DMM, etc.).
-	 * Special game modes use the same username as the main account but should not sync
-	 * to avoid data conflicts.
+	 * Checks if the player is on a special game mode world.
+	 * Special game modes (Leagues, DMM, Fresh Start, Tournaments, Beta, Speedrunning)
+	 * use the same username as the main account but have separate progression
+	 * and should not sync to avoid data conflicts with main game data.
 	 */
 	private boolean isSpecialGameMode()
 	{
 		EnumSet<WorldType> worldTypes = client.getWorldType();
-		return worldTypes.contains(WorldType.SEASONAL) || worldTypes.contains(WorldType.DEADMAN);
+		return worldTypes.contains(WorldType.SEASONAL)
+			|| worldTypes.contains(WorldType.DEADMAN)
+			|| worldTypes.contains(WorldType.FRESH_START_WORLD)
+			|| worldTypes.contains(WorldType.TOURNAMENT_WORLD)
+			|| worldTypes.contains(WorldType.BETA_WORLD)
+			|| worldTypes.contains(WorldType.NOSAVE_MODE)
+			|| worldTypes.contains(WorldType.QUEST_SPEEDRUNNING);
 	}
 }

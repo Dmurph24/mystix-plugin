@@ -7,20 +7,30 @@ import static org.junit.Assert.*;
 
 /**
  * Tests for special game mode detection using WorldType enum.
- * Verifies that SEASONAL and DEADMAN world types are available for checking.
+ * Verifies that all special game mode world types are available for checking.
+ * Special modes that should be excluded: SEASONAL, DEADMAN, FRESH_START_WORLD,
+ * TOURNAMENT_WORLD, BETA_WORLD, NOSAVE_MODE, QUEST_SPEEDRUNNING.
  */
 public class SpecialGameModeTest
 {
 	@Test
-	public void testWorldTypeSeasonalExists()
+	public void testSpecialGameModeWorldTypesExist()
 	{
 		assertNotNull("WorldType.SEASONAL should exist", WorldType.SEASONAL);
+		assertNotNull("WorldType.DEADMAN should exist", WorldType.DEADMAN);
+		assertNotNull("WorldType.FRESH_START_WORLD should exist", WorldType.FRESH_START_WORLD);
+		assertNotNull("WorldType.TOURNAMENT_WORLD should exist", WorldType.TOURNAMENT_WORLD);
+		assertNotNull("WorldType.BETA_WORLD should exist", WorldType.BETA_WORLD);
+		assertNotNull("WorldType.NOSAVE_MODE should exist", WorldType.NOSAVE_MODE);
+		assertNotNull("WorldType.QUEST_SPEEDRUNNING should exist", WorldType.QUEST_SPEEDRUNNING);
 	}
 
 	@Test
-	public void testWorldTypeDeadmanExists()
+	public void testNormalGameModeWorldTypesExist()
 	{
-		assertNotNull("WorldType.DEADMAN should exist", WorldType.DEADMAN);
+		assertNotNull("WorldType.MEMBERS should exist", WorldType.MEMBERS);
+		assertNotNull("WorldType.SKILL_TOTAL should exist", WorldType.SKILL_TOTAL);
+		assertNotNull("WorldType.PVP should exist", WorldType.PVP);
 	}
 
 	@Test
@@ -28,17 +38,36 @@ public class SpecialGameModeTest
 	{
 		WorldType[] types = WorldType.values();
 		assertNotNull(types);
-		assertTrue("Should have multiple WorldType values", types.length > 0);
+		assertTrue("Should have multiple WorldType values", types.length >= 7);
 		
-		boolean hasSeasonalOrDeadman = false;
-		for (WorldType type : types)
+		boolean hasAllSpecialModes = true;
+		WorldType[] specialModes = {
+			WorldType.SEASONAL,
+			WorldType.DEADMAN,
+			WorldType.FRESH_START_WORLD,
+			WorldType.TOURNAMENT_WORLD,
+			WorldType.BETA_WORLD,
+			WorldType.NOSAVE_MODE,
+			WorldType.QUEST_SPEEDRUNNING
+		};
+		
+		for (WorldType specialMode : specialModes)
 		{
-			if (type == WorldType.SEASONAL || type == WorldType.DEADMAN)
+			boolean found = false;
+			for (WorldType type : types)
 			{
-				hasSeasonalOrDeadman = true;
+				if (type == specialMode)
+				{
+					found = true;
+					break;
+				}
+			}
+			if (!found)
+			{
+				hasAllSpecialModes = false;
 				break;
 			}
 		}
-		assertTrue("WorldType enum should contain SEASONAL or DEADMAN", hasSeasonalOrDeadman);
+		assertTrue("WorldType enum should contain all special game mode types", hasAllSpecialModes);
 	}
 }
