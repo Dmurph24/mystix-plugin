@@ -32,8 +32,7 @@ import com.mystix.wom.WomSyncService;
 @Slf4j
 @PluginDescriptor(name = "Mystix")
 @PluginDependency(TimeTrackingPlugin.class)
-public class MystixPlugin extends Plugin
-{
+public class MystixPlugin extends Plugin {
 	@Inject
 	private Client client;
 
@@ -65,8 +64,7 @@ public class MystixPlugin extends Plugin
 	private String lastUsername;
 
 	@Override
-	protected void startUp() throws Exception
-	{
+	protected void startUp() throws Exception {
 		log.debug("Mystix started");
 
 		TimeTrackingConfig timeTrackingConfig = configManager.getConfig(TimeTrackingConfig.class);
@@ -78,8 +76,7 @@ public class MystixPlugin extends Plugin
 				itemManager,
 				configManager,
 				timeTrackingConfig,
-				notifier
-		);
+				notifier);
 		FarmingTracker farmingTracker = new FarmingTracker(
 				client,
 				itemManager,
@@ -88,8 +85,7 @@ public class MystixPlugin extends Plugin
 				farmingWorld,
 				notifier,
 				compostTracker,
-				paymentTracker
-		);
+				paymentTracker);
 
 		timerMonitor.initialize(farmingTracker, birdHouseTracker, farmingWorld);
 		timerMonitor.start();
@@ -99,13 +95,11 @@ public class MystixPlugin extends Plugin
 		eventBus.register(this);
 
 		SwingUtilities.invokeLater(() -> notifier.notify(
-				"Mystix syncs enabled plugins to the external Mystix server outside of RuneLite. Disable any plugins in Configuration > Mystix you don't want synced to your app."
-		));
+				"Mystix syncs enabled plugins to the external Mystix server outside of RuneLite. Disable any plugins in Configuration > Mystix you don't want synced to your app."));
 	}
 
 	@Override
-	protected void shutDown() throws Exception
-	{
+	protected void shutDown() throws Exception {
 		eventBus.unregister(this);
 		timerMonitor.stop();
 		playerSkillsMonitor.stop();
@@ -114,78 +108,65 @@ public class MystixPlugin extends Plugin
 	}
 
 	@Subscribe
-	public void onGameStateChanged(GameStateChanged event)
-	{
-		if (!config.syncWiseOldMan())
-		{
+	public void onGameStateChanged(GameStateChanged event) {
+		if (!config.syncWiseOldMan()) {
 			return;
 		}
-		if (isSpecialGameMode())
-		{
+		if (isSpecialGameMode()) {
 			log.debug("WOM sync skipped: special game mode detected (Leagues, DMM, etc.)");
 			return;
 		}
 
 		GameState state = event.getGameState();
 
-		if (state == GameState.LOGGED_IN)
-		{
+		if (state == GameState.LOGGED_IN) {
 			// Defer username lookup one tick so the local player is populated
 			Player local = client.getLocalPlayer();
-			if (local != null && local.getName() != null && !local.getName().isBlank())
-			{
+			if (local != null && local.getName() != null && !local.getName().isBlank()) {
 				lastUsername = local.getName();
 				womSyncService.updatePlayer(lastUsername);
 			}
-		}
-		else if (state == GameState.LOGIN_SCREEN || state == GameState.HOPPING)
-		{
-			if (lastUsername != null)
-			{
+		} else if (state == GameState.LOGIN_SCREEN || state == GameState.HOPPING) {
+			if (lastUsername != null) {
 				womSyncService.updatePlayer(lastUsername);
 				lastUsername = null;
 			}
 		}
 	}
 
-	private static final String TEARS_CAVE_MESSAGE =
-		"Your stories have entertained me. I will let you into the cave for a short time.";
+	private static final String TEARS_CAVE_MESSAGE = "Your stories have entertained me. I will let you into the cave for a short time.";
 
 	@Subscribe
-	public void onChatMessage(ChatMessage event)
-	{
-		if (event.getType() != ChatMessageType.GAMEMESSAGE && event.getType() != ChatMessageType.DIALOG)
-		{
+	public void onChatMessage(ChatMessage event) {
+		if (event.getType() != ChatMessageType.GAMEMESSAGE && event.getType() != ChatMessageType.DIALOG) {
 			return;
 		}
 		String msg = event.getMessage();
-		if (msg != null && msg.contains(TEARS_CAVE_MESSAGE))
-		{
+		if (msg != null && msg.contains(TEARS_CAVE_MESSAGE)) {
 			timerMonitor.onTearsOfGuthixCompleted();
 		}
 	}
 
 	@Provides
-	MystixConfig provideConfig(ConfigManager configManager)
-	{
+	MystixConfig provideConfig(ConfigManager configManager) {
 		return configManager.getConfig(MystixConfig.class);
 	}
 
 	/**
 	 * Checks if the player is on a special game mode world.
-	 * Special game modes (Leagues, DMM, Fresh Start, Tournaments, Beta, Speedrunning)
+	 * Special game modes (Leagues, DMM, Fresh Start, Tournaments, Beta,
+	 * Speedrunning)
 	 * use the same username as the main account but have separate progression
 	 * and should not sync to avoid data conflicts with main game data.
 	 */
-	private boolean isSpecialGameMode()
-	{
+	private boolean isSpecialGameMode() {
 		EnumSet<WorldType> worldTypes = client.getWorldType();
 		return worldTypes.contains(WorldType.SEASONAL)
-			|| worldTypes.contains(WorldType.DEADMAN)
-			|| worldTypes.contains(WorldType.FRESH_START_WORLD)
-			|| worldTypes.contains(WorldType.TOURNAMENT_WORLD)
-			|| worldTypes.contains(WorldType.BETA_WORLD)
-			|| worldTypes.contains(WorldType.NOSAVE_MODE)
-			|| worldTypes.contains(WorldType.QUEST_SPEEDRUNNING);
+				|| worldTypes.contains(WorldType.DEADMAN)
+				|| worldTypes.contains(WorldType.FRESH_START_WORLD)
+				|| worldTypes.contains(WorldType.TOURNAMENT_WORLD)
+				|| worldTypes.contains(WorldType.BETA_WORLD)
+				|| worldTypes.contains(WorldType.NOSAVE_MODE)
+				|| worldTypes.contains(WorldType.QUEST_SPEEDRUNNING);
 	}
 }

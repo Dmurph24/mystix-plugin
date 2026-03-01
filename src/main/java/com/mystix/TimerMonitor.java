@@ -14,6 +14,9 @@ import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 import javax.inject.Inject;
 import javax.inject.Singleton;
+import net.runelite.api.events.GameStateChanged;
+import net.runelite.client.eventbus.EventBus;
+import net.runelite.client.eventbus.Subscribe;
 import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.Client;
 import net.runelite.api.GameState;
@@ -22,6 +25,7 @@ import net.runelite.api.WorldType;
 import net.runelite.client.config.ConfigManager;
 import net.runelite.client.plugins.timetracking.TimeTrackingConfig;
 import net.runelite.client.plugins.timetracking.SummaryState;
+import com.mystix.runelite.farming.CropState;
 import com.mystix.runelite.farming.FarmingPatch;
 import com.mystix.runelite.farming.FarmingTracker;
 import com.mystix.runelite.farming.PatchPrediction;
@@ -40,12 +44,14 @@ import com.mystix.runelite.hunter.BirdHouseTracker;
 public class TimerMonitor {
 	private static final int INITIAL_DELAY_SECONDS = 10;
 	private static final int SYNC_INTERVAL_SECONDS = 45;
+	private static final int LOGIN_SYNC_DELAY_SECONDS = 3;
 
 	private final Client client;
 	private final MystixConfig config;
 	private final MystixApiClient apiClient;
 	private final ConfigManager configManager;
 	private final ScheduledExecutorService executorService;
+	private final EventBus eventBus;
 
 	private FarmingTracker farmingTracker;
 	private BirdHouseTracker birdHouseTracker;
@@ -53,6 +59,7 @@ public class TimerMonitor {
 	private ScheduledFuture<?> scheduledFuture;
 	private String lastSentSnapshot;
 	private volatile Instant tearsOfGuthixNextReset = null;
+	private GameState previousGameState = GameState.UNKNOWN;
 
 	@Inject
 	public TimerMonitor(
@@ -60,15 +67,18 @@ public class TimerMonitor {
 			MystixConfig config,
 			MystixApiClient apiClient,
 			ConfigManager configManager,
-			ScheduledExecutorService executorService) {
+			ScheduledExecutorService executorService,
+			EventBus eventBus) {
 		this.client = client;
 		this.config = config;
 		this.apiClient = apiClient;
 		this.configManager = configManager;
 		this.executorService = executorService;
+		this.eventBus = eventBus;
 	}
 
-	public void initialize(FarmingTracker farmingTracker, BirdHouseTracker birdHouseTracker, com.mystix.runelite.farming.FarmingWorld farmingWorld) {
+	public void initialize(FarmingTracker farmingTracker, BirdHouseTracker birdHouseTracker,
+			com.mystix.runelite.farming.FarmingWorld farmingWorld) {
 		this.farmingTracker = farmingTracker;
 		this.birdHouseTracker = birdHouseTracker;
 		this.farmingWorld = farmingWorld;
@@ -82,6 +92,7 @@ public class TimerMonitor {
 		if (scheduledFuture != null) {
 			return;
 		}
+		eventBus.register(this);
 		scheduledFuture = executorService.scheduleAtFixedRate(
 				this::sync,
 				INITIAL_DELAY_SECONDS,
@@ -91,13 +102,27 @@ public class TimerMonitor {
 	}
 
 	public void stop() {
+		eventBus.unregister(this);
 		if (scheduledFuture != null) {
 			scheduledFuture.cancel(false);
 			scheduledFuture = null;
 		}
 		lastSentSnapshot = null;
 		tearsOfGuthixNextReset = null;
+		previousGameState = GameState.UNKNOWN;
 		log.debug("TimerMonitor stopped");
+	}
+
+	@Subscribe
+	public void onGameStateChanged(GameStateChanged event) {
+		GameState newState = event.getGameState();
+		if (newState == GameState.LOGGED_IN && previousGameState != GameState.LOGGED_IN) {
+			// Defer sync so the local player and time-tracking data are ready
+			log.debug("Player logged in, scheduling timer sync in {}s", LOGIN_SYNC_DELAY_SECONDS);
+			lastSentSnapshot = null; // Force send on next sync
+			executorService.schedule(this::sync, LOGIN_SYNC_DELAY_SECONDS, TimeUnit.SECONDS);
+		}
+		previousGameState = newState;
 	}
 
 	/**
@@ -160,6 +185,12 @@ public class TimerMonitor {
 				if (prediction.getProduce() == Produce.WEEDS || prediction.getProduce() == Produce.SCARECROW) {
 					continue;
 				}
+				// Only sync patches that are actively growing. When HARVESTABLE, the config gets
+				// overwritten on each harvest (varbit + current time), which corrupts completed_at
+				// and started_at. GROWING patches have reliable planted-time data.
+				if (prediction.getCropState() != CropState.GROWING) {
+					continue;
+				}
 				long doneEstimate = prediction.getDoneEstimate();
 				if (doneEstimate <= 0) {
 					continue;
@@ -205,7 +236,8 @@ public class TimerMonitor {
 			}
 		}
 
-		// Tears of Guthix — playable again 7 days after completion; timer set when player enters cave
+		// Tears of Guthix — playable again 7 days after completion; timer set when
+		// player enters cave
 		// No per-timer bell in RuneLite; use sync master switch
 		Instant togReset = tearsOfGuthixNextReset;
 		if (togReset != null && togReset.isAfter(Instant.now())) {
@@ -228,41 +260,44 @@ public class TimerMonitor {
 	}
 
 	/**
-	 * Reads the per-patch notification setting (bell icon) from Time Tracking config.
+	 * Reads the per-patch notification setting (bell icon) from Time Tracking
+	 * config.
 	 * Config key format matches FarmingPatch.notifyConfigKey().
 	 */
 	private boolean isFarmingNotifyEnabled(FarmingPatch patch) {
 		String notifyKey = TimeTrackingConfig.NOTIFY + "." + patch.getRegion().getRegionID() + "." + patch.getVarbit();
 		String profileKey = configManager.getRSProfileKey();
-		return Boolean.TRUE.equals(configManager.getConfiguration(TimeTrackingConfig.CONFIG_GROUP, profileKey, notifyKey, Boolean.class));
+		return Boolean.TRUE
+				.equals(configManager.getConfiguration(TimeTrackingConfig.CONFIG_GROUP, profileKey, notifyKey, Boolean.class));
 	}
 
 	/**
 	 * Reads the bird house notification toggle from Time Tracking config.
 	 */
 	private boolean isBirdHouseNotifyEnabled() {
-		return Boolean.TRUE.equals(configManager.getRSProfileConfiguration(TimeTrackingConfig.CONFIG_GROUP, TimeTrackingConfig.BIRDHOUSE_NOTIFY, boolean.class));
+		return Boolean.TRUE.equals(configManager.getRSProfileConfiguration(TimeTrackingConfig.CONFIG_GROUP,
+				TimeTrackingConfig.BIRDHOUSE_NOTIFY, boolean.class));
 	}
 
 	/**
 	 * Checks if the player is on a special game mode world.
-	 * Special game modes (Leagues, DMM, Fresh Start, Tournaments, Beta, Speedrunning)
+	 * Special game modes (Leagues, DMM, Fresh Start, Tournaments, Beta,
+	 * Speedrunning)
 	 * use the same username as the main account but have separate progression
 	 * and should not sync to avoid data conflicts with main game data.
 	 */
 	/**
-	 * Computes started_at for a farming patch from completion time and growth duration.
+	 * Computes started_at for a farming patch from completion time and growth
+	 * duration.
 	 * started_at = completed_at - (stages - 1) * tickrate * 60 seconds.
 	 */
 	private Instant computeFarmingStartedAt(PatchPrediction prediction, long doneEstimate) {
 		int tickRate = prediction.getProduce().getTickrate();
-		if (isLeaguesWorld())
-		{
+		if (isLeaguesWorld()) {
 			tickRate = tickRate / 5;
 		}
 		int stages = prediction.getStages();
-		if (tickRate <= 0 || stages <= 1)
-		{
+		if (tickRate <= 0 || stages <= 1) {
 			return null;
 		}
 		long growthSeconds = (long) (stages - 1) * tickRate * 60;
@@ -277,11 +312,11 @@ public class TimerMonitor {
 	private boolean isSpecialGameMode() {
 		EnumSet<WorldType> worldTypes = client.getWorldType();
 		return worldTypes.contains(WorldType.SEASONAL)
-			|| worldTypes.contains(WorldType.DEADMAN)
-			|| worldTypes.contains(WorldType.FRESH_START_WORLD)
-			|| worldTypes.contains(WorldType.TOURNAMENT_WORLD)
-			|| worldTypes.contains(WorldType.BETA_WORLD)
-			|| worldTypes.contains(WorldType.NOSAVE_MODE)
-			|| worldTypes.contains(WorldType.QUEST_SPEEDRUNNING);
+				|| worldTypes.contains(WorldType.DEADMAN)
+				|| worldTypes.contains(WorldType.FRESH_START_WORLD)
+				|| worldTypes.contains(WorldType.TOURNAMENT_WORLD)
+				|| worldTypes.contains(WorldType.BETA_WORLD)
+				|| worldTypes.contains(WorldType.NOSAVE_MODE)
+				|| worldTypes.contains(WorldType.QUEST_SPEEDRUNNING);
 	}
 }
