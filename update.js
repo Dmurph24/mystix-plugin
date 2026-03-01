@@ -104,6 +104,32 @@ patchCopiedFiles(
   '/* config write removed - Mystix is read-only */'
 )
 
+console.log('Patching: Add getEntityIdForCompletionTime to BirdHouseTracker')
+const birdHouseTrackerPath = path.join(RUNELITE_COPY_PATH, 'hunter', 'BirdHouseTracker.java')
+if (fs.existsSync(birdHouseTrackerPath)) {
+  let content = fs.readFileSync(birdHouseTrackerPath, 'utf-8')
+  const method = `
+	/**
+	 * Returns the OSRS item ID of a bird house that completes at the given time, or null if not found.
+	 * Used by Mystix for entity_id in timer sync.
+	 */
+	public Integer getEntityIdForCompletionTime(long completionTime) {
+		for (BirdHouseData data : birdHouseData.values()) {
+			if (BirdHouseState.fromVarpValue(data.getVarp()) == BirdHouseState.SEEDED
+				&& data.getTimestamp() + BIRD_HOUSE_DURATION == completionTime) {
+				BirdHouse birdHouse = BirdHouse.fromVarpValue(data.getVarp());
+				if (birdHouse != null) {
+					return birdHouse.getItemID();
+				}
+			}
+		}
+		return null;
+	}
+`
+  content = content.replace(/\n}$/, method + '\n}')
+  fs.writeFileSync(birdHouseTrackerPath, content, 'utf-8')
+}
+
 console.log('Patching: Add generation comment')
 const GENERATED_COMMENT = '// Auto-generated from RuneLite. Do not edit. Run: node update.js\n\n'
 patchCopiedFiles(/\/\*\s*\n\s*\* Copyright/, GENERATED_COMMENT + '/*\n * Copyright')

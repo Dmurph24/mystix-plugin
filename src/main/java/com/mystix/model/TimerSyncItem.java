@@ -19,6 +19,10 @@ public class TimerSyncItem
 	String playerUsername;
 	/** When the timer started; null if unknown (e.g. Tears of Guthix weekly reset). */
 	Instant startedAt;
+	/** Crop state for farming patches only: growing, harvestable, diseased, dead, empty, filling; null otherwise. */
+	String cropState;
+	/** OSRS item ID for the entity (farming produce, bird house); null if not applicable. */
+	Integer osrsItemId;
 
 	/**
 	 * Format string for API: lowercase, spaces instead of underscores.
@@ -44,6 +48,14 @@ public class TimerSyncItem
 		if (startedAt != null)
 		{
 			sb.append(",\"started_at\":\"").append(startedAt.toString()).append("\"");
+		}
+		if (cropState != null && !cropState.isBlank())
+		{
+			sb.append(",\"crop_state\":\"").append(escapeJson(toApiFormat(cropState))).append("\"");
+		}
+		if (osrsItemId != null)
+		{
+			sb.append(",\"osrs_item_id\":").append(osrsItemId);
 		}
 		sb.append(",\"notifications_enabled\":").append(notificationsEnabled)
 			.append(",\"player_username\":\"").append(escapeJson(toApiFormat(playerUsername)))

@@ -241,7 +241,28 @@ public class BirdHouseTracker
 		for (BirdHouseData data : updatedData.values())
 		{
 			String key = TimeTrackingConfig.BIRD_HOUSE + "." + data.getSpace().getVarp();
-			configManager.setRSProfileConfiguration(TimeTrackingConfig.CONFIG_GROUP, key, data.getVarp() + ":" + data.getTimestamp());
+			/* config write removed - Mystix is read-only */
 		}
+	}
+
+	/**
+	 * Returns the OSRS item ID of a bird house that completes at the given time, or null if not found.
+	 * Used by Mystix for entity_id in timer sync.
+	 */
+	public Integer getEntityIdForCompletionTime(long completionTime)
+	{
+		for (BirdHouseData data : birdHouseData.values())
+		{
+			if (BirdHouseState.fromVarpValue(data.getVarp()) == BirdHouseState.SEEDED
+				&& data.getTimestamp() + BIRD_HOUSE_DURATION == completionTime)
+			{
+				BirdHouse birdHouse = BirdHouse.fromVarpValue(data.getVarp());
+				if (birdHouse != null)
+				{
+					return birdHouse.getItemID();
+				}
+			}
+		}
+		return null;
 	}
 }

@@ -206,6 +206,7 @@ public class TimerMonitor {
 				}
 				Instant completedAt = Instant.ofEpochSecond(doneEstimate);
 				Instant startedAt = computeFarmingStartedAt(prediction, doneEstimate);
+				int produceItemId = prediction.getProduce().getItemID();
 				timers.add(new TimerSyncItem(
 						tabName,
 						regionName,
@@ -213,7 +214,9 @@ public class TimerMonitor {
 						completedAt,
 						notificationsEnabled,
 						playerUsername,
-						startedAt));
+						startedAt,
+						prediction.getCropState().name().toLowerCase(),
+						produceItemId >= 0 ? produceItemId : null));
 			}
 		}
 
@@ -225,6 +228,7 @@ public class TimerMonitor {
 				Instant completedAt = Instant.ofEpochSecond(completionTime);
 				// Bird house duration is 50 minutes (from BirdHouseTracker.BIRD_HOUSE_DURATION)
 				Instant startedAt = Instant.ofEpochSecond(completionTime - 50 * 60);
+				Integer birdHouseEntityId = birdHouseTracker.getEntityIdForCompletionTime(completionTime);
 				timers.add(new TimerSyncItem(
 						"bird house",
 						"fossil island",
@@ -232,7 +236,9 @@ public class TimerMonitor {
 						completedAt,
 						birdHouseNotify,
 						playerUsername,
-						startedAt));
+						startedAt,
+						null,
+						birdHouseEntityId));
 			}
 		}
 
@@ -248,6 +254,8 @@ public class TimerMonitor {
 					togReset,
 					syncEnabled,
 					playerUsername,
+					null,
+					null,
 					null));
 		}
 
