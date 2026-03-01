@@ -173,13 +173,16 @@ public class TimerMonitor {
 				if (tabName == null || tabName.isBlank()) {
 					tabName = entry.getKey().name().toLowerCase();
 				}
+				Instant completedAt = Instant.ofEpochSecond(doneEstimate);
+				Instant startedAt = computeFarmingStartedAt(prediction, doneEstimate);
 				timers.add(new TimerSyncItem(
 						tabName,
 						regionName,
 						prediction.getProduce().getName(),
-						Instant.ofEpochSecond(doneEstimate),
+						completedAt,
 						notificationsEnabled,
-						playerUsername));
+						playerUsername,
+						startedAt));
 			}
 		}
 
@@ -188,13 +191,17 @@ public class TimerMonitor {
 			long completionTime = birdHouseTracker.getCompletionTime();
 			if (completionTime > 0) {
 				boolean birdHouseNotify = syncEnabled && isBirdHouseNotifyEnabled();
+				Instant completedAt = Instant.ofEpochSecond(completionTime);
+				// Bird house duration is 50 minutes (from BirdHouseTracker.BIRD_HOUSE_DURATION)
+				Instant startedAt = Instant.ofEpochSecond(completionTime - 50 * 60);
 				timers.add(new TimerSyncItem(
 						"bird house",
 						"fossil island",
 						"bird house",
-						Instant.ofEpochSecond(completionTime),
+						completedAt,
 						birdHouseNotify,
-						playerUsername));
+						playerUsername,
+						startedAt));
 			}
 		}
 
@@ -208,7 +215,8 @@ public class TimerMonitor {
 					"tears of guthix",
 					togReset,
 					syncEnabled,
-					playerUsername));
+					playerUsername,
+					null));
 		}
 
 		String snapshot = TimersSyncPayload.toJson(timers);
@@ -242,6 +250,30 @@ public class TimerMonitor {
 	 * use the same username as the main account but have separate progression
 	 * and should not sync to avoid data conflicts with main game data.
 	 */
+	/**
+	 * Computes started_at for a farming patch from completion time and growth duration.
+	 * started_at = completed_at - (stages - 1) * tickrate * 60 seconds.
+	 */
+	private Instant computeFarmingStartedAt(PatchPrediction prediction, long doneEstimate) {
+		int tickRate = prediction.getProduce().getTickrate();
+		if (isLeaguesWorld())
+		{
+			tickRate = tickRate / 5;
+		}
+		int stages = prediction.getStages();
+		if (tickRate <= 0 || stages <= 1)
+		{
+			return null;
+		}
+		long growthSeconds = (long) (stages - 1) * tickRate * 60;
+		return Instant.ofEpochSecond(doneEstimate - growthSeconds);
+	}
+
+	private boolean isLeaguesWorld() {
+		EnumSet<WorldType> worldTypes = client.getWorldType();
+		return worldTypes.contains(WorldType.SEASONAL) && !worldTypes.contains(WorldType.DEADMAN);
+	}
+
 	private boolean isSpecialGameMode() {
 		EnumSet<WorldType> worldTypes = client.getWorldType();
 		return worldTypes.contains(WorldType.SEASONAL)

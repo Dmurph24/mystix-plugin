@@ -4,8 +4,9 @@ import java.util.List;
 
 /**
  * Bulk timers sync payload matching the backend TimersSyncSerializer.
- * {"timers": [{timer_type, region, entity, completed_at, notifications_enabled, player_username}, ...]}
+ * {"timers": [{timer_type, region, entity, completed_at, started_at?, notifications_enabled, player_username}, ...]}
  * All strings are lowercased with spaces (no underscores).
+ * started_at is optional; when present it enables the Flutter app to show the timer as active.
  */
 public final class TimersSyncPayload
 {

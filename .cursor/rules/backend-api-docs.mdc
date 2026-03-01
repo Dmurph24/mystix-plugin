@@ -42,12 +42,14 @@ Sync timer data from the Time Tracking plugin.
     "timer_type": "tree",
     "region": "farming guild",
     "entity": "Oak tree",
+    "started_at": "2025-02-21T12:00:00Z",
     "completed_at": "2025-02-21T14:30:00Z",
     "notifications_enabled": true,
     "player_username": "TestPlayer"
   }]
 }
 ```
+`started_at` is optional; when provided it is used by the Flutter app to show active timers.
 
 #### POST /api/runelite/skills/
 Sync player skill levels, XP, total level, and combat level.

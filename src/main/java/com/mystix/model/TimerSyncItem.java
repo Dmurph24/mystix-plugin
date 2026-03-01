@@ -17,6 +17,8 @@ public class TimerSyncItem
 	Instant completedAt;
 	boolean notificationsEnabled;
 	String playerUsername;
+	/** When the timer started; null if unknown (e.g. Tears of Guthix weekly reset). */
+	Instant startedAt;
 
 	/**
 	 * Format string for API: lowercase, spaces instead of underscores.
@@ -38,8 +40,12 @@ public class TimerSyncItem
 		sb.append("{\"timer_type\":\"").append(escapeJson(toApiFormat(timerType)))
 			.append("\",\"region\":\"").append(escapeJson(toApiFormat(region)))
 			.append("\",\"entity\":\"").append(escapeJson(toApiFormat(entity)))
-			.append("\",\"completed_at\":\"").append(completedAt.toString())
-			.append("\",\"notifications_enabled\":").append(notificationsEnabled)
+			.append("\",\"completed_at\":\"").append(completedAt.toString()).append("\"");
+		if (startedAt != null)
+		{
+			sb.append(",\"started_at\":\"").append(startedAt.toString()).append("\"");
+		}
+		sb.append(",\"notifications_enabled\":").append(notificationsEnabled)
 			.append(",\"player_username\":\"").append(escapeJson(toApiFormat(playerUsername)))
 			.append("\"}");
 	}
