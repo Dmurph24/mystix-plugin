@@ -185,10 +185,8 @@ public class TimerMonitor {
 				if (prediction.getProduce() == Produce.WEEDS || prediction.getProduce() == Produce.SCARECROW) {
 					continue;
 				}
-				// Only sync patches that are actively growing. When HARVESTABLE, the config gets
-				// overwritten on each harvest (varbit + current time), which corrupts completed_at
-				// and started_at. GROWING patches have reliable planted-time data.
-				if (prediction.getCropState() != CropState.GROWING) {
+				// Skip EMPTY and FILLING - they have no meaningful completion timer.
+				if (prediction.getCropState() == CropState.EMPTY || prediction.getCropState() == CropState.FILLING) {
 					continue;
 				}
 				long doneEstimate = prediction.getDoneEstimate();
