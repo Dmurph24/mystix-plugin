@@ -16,6 +16,11 @@ public interface MystixConfig extends Config {
 		return true;
 	}
 
+	@ConfigItem(keyName = "syncBankMemory", name = "Bank Memory", description = "Sync your bank contents to Mystix when you open your bank.", position = 2)
+	default boolean syncBankMemory() {
+		return true;
+	}
+
 	@ConfigItem(keyName = "syncWiseOldMan", name = "Sync with Wise Old Man", description = "Update your Wise Old Man profile automatically when you log in or out.", position = 3)
 	default boolean syncWiseOldMan() {
 		return true;

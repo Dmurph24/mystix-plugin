@@ -48,9 +48,13 @@
 		</encoder>
 	</appender>
 
-	<root level="INFO">
+	<!-- Mystix: DEBUG and above to console only; no propagation to root -->
+	<logger name="com.mystix" level="DEBUG" additivity="false">
+		<appender-ref ref="STDOUT"/>
+	</logger>
+
+	<root level="WARN">
 		<appender-ref ref="STDOUT"/>
 		<appender-ref ref="FILE"/>
 	</root>
-	<logger name="com.mystix" level="DEBUG" />
 </configuration>

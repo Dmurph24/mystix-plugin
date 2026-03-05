@@ -6,7 +6,8 @@ import lombok.Value;
 /**
  * Single timer item matching the backend TimersSyncSerializer format.
  * Sent in bulk as {"timers": [...]} to POST /api/runelite/timers/
- * All string fields are lowercased with spaces (no underscores).
+ * Enum-like string fields are lowercased with spaces (no underscores).
+ * playerUsername is sent as-is (case-sensitive).
  */
 @Value
 public class TimerSyncItem
@@ -23,6 +24,8 @@ public class TimerSyncItem
 	String cropState;
 	/** OSRS item ID for the entity (farming produce, bird house); null if not applicable. */
 	Integer osrsItemId;
+	/** Stable patch identifier (varbit ID for farming patches); 0 for non-farming timers. */
+	int patchId;
 
 	/**
 	 * Format string for API: lowercase, spaces instead of underscores.
@@ -57,8 +60,9 @@ public class TimerSyncItem
 		{
 			sb.append(",\"osrs_item_id\":").append(osrsItemId);
 		}
-		sb.append(",\"notifications_enabled\":").append(notificationsEnabled)
-			.append(",\"player_username\":\"").append(escapeJson(toApiFormat(playerUsername)))
+		sb.append(",\"patch_id\":").append(patchId)
+			.append(",\"notifications_enabled\":").append(notificationsEnabled)
+			.append(",\"player_username\":\"").append(escapeJson(playerUsername))
 			.append("\"}");
 	}
 

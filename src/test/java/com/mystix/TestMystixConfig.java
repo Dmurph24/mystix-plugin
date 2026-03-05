@@ -6,6 +6,7 @@ package com.mystix;
 public class TestMystixConfig implements MystixConfig {
 	private String mystixAppKey = "";
 	private boolean syncTimeTracking = true;
+	private boolean syncBankMemory = true;
 
 	@Override
 	public String mystixAppKey() {
@@ -17,11 +18,20 @@ public class TestMystixConfig implements MystixConfig {
 		return syncTimeTracking;
 	}
 
+	@Override
+	public boolean syncBankMemory() {
+		return syncBankMemory;
+	}
+
 	public void setMystixAppKey(String key) {
 		this.mystixAppKey = key;
 	}
 
 	public void setSyncTimeTracking(boolean value) {
 		this.syncTimeTracking = value;
+	}
+
+	public void setSyncBankMemory(boolean value) {
+		this.syncBankMemory = value;
 	}
 }

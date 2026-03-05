@@ -1,10 +1,12 @@
 package com.mystix.api;
 
 import com.mystix.MystixConfig;
+import com.mystix.model.BankSyncPayload;
 import com.mystix.model.PlayerSkillsSyncPayload;
 import com.mystix.model.TimerSyncItem;
 import com.mystix.model.TimersSyncPayload;
 import java.time.Instant;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
@@ -55,6 +57,15 @@ public class MystixApiClientTest {
 		skills.put("Defence", new PlayerSkillsSyncPayload.SkillData(70, 800000));
 		PlayerSkillsSyncPayload payload = new PlayerSkillsSyncPayload("TestPlayer", skills, 145, 85);
 		client.sendPlayerSkillsSync(payload);
+		// Should not throw; with empty key it returns early
+	}
+
+	@Test
+	public void testSendBankSyncWithEmptyAppKeyDoesNotThrow() {
+		MystixApiClient client = new MystixApiClient(emptyKeyConfig());
+		BankSyncPayload payload = new BankSyncPayload("TestPlayer",
+				Arrays.asList(new BankSyncPayload.BankItem(4151, 1)));
+		client.sendBankSync(payload);
 		// Should not throw; with empty key it returns early
 	}
 

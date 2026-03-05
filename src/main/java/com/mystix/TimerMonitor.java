@@ -214,7 +214,8 @@ public class TimerMonitor {
 						playerUsername,
 						startedAt,
 						prediction.getCropState().name().toLowerCase(),
-						produceItemId >= 0 ? produceItemId : null));
+						produceItemId >= 0 ? produceItemId : null,
+						patch.getVarbit()));
 			}
 		}
 
@@ -236,7 +237,8 @@ public class TimerMonitor {
 						playerUsername,
 						startedAt,
 						null,
-						birdHouseEntityId));
+						birdHouseEntityId,
+						0));
 			}
 		}
 
@@ -254,7 +256,8 @@ public class TimerMonitor {
 					playerUsername,
 					null,
 					null,
-					null));
+					null,
+					0));
 		}
 
 		String snapshot = TimersSyncPayload.toJson(timers);
