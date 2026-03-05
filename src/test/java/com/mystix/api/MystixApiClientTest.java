@@ -29,7 +29,7 @@ public class MystixApiClientTest {
 	public void testSendWithEmptyAppKeyDoesNotThrow() {
 		MystixApiClient client = new MystixApiClient(emptyKeyConfig());
 		TimerSyncItem item = new TimerSyncItem("bird house", "fossil island", "bird house",
-				Instant.ofEpochSecond(1700000000L), true, "TestPlayer", null, null, null);
+				Instant.ofEpochSecond(1700000000L), true, "TestPlayer", null, null, null, 0);
 		client.sendTimersSync(Collections.singletonList(item));
 		// Should not throw; with empty key it returns early
 	}
@@ -37,7 +37,7 @@ public class MystixApiClientTest {
 	@Test
 	public void testPayloadStructure() {
 		TimerSyncItem item = new TimerSyncItem("tree", "farming guild", "Oak tree", Instant.ofEpochSecond(1700000000L),
-				true, "TestPlayer", null, null, null);
+				true, "TestPlayer", null, null, null, 0);
 		String json = TimersSyncPayload.toJson(Collections.singletonList(item));
 		assertNotNull(json);
 		assertTrue(json.contains("\"timers\""));
@@ -46,7 +46,7 @@ public class MystixApiClientTest {
 		assertTrue(json.contains("\"entity\":\"oak tree\""));
 		assertTrue(json.contains("\"completed_at\""));
 		assertTrue(json.contains("\"notifications_enabled\":true"));
-		assertTrue(json.contains("\"player_username\":\"testplayer\""));
+		assertTrue(json.contains("\"player_username\":\"TestPlayer\""));
 	}
 
 	@Test
