@@ -33,7 +33,7 @@ import net.runelite.api.gameval.VarPlayerID;
 
 @AllArgsConstructor
 @Getter
-enum BirdHouseSpace
+public enum BirdHouseSpace
 {
 	MEADOW_NORTH("Mushroom Meadow (North)", VarPlayerID.BIRDHOUSE_TRANSMIT_A),
 	MEADOW_SOUTH("Mushroom Meadow (South)", VarPlayerID.BIRDHOUSE_TRANSMIT_B),

@@ -30,6 +30,10 @@ import com.mystix.runelite.farming.FarmingPatch;
 import com.mystix.runelite.farming.FarmingTracker;
 import com.mystix.runelite.farming.PatchPrediction;
 import com.mystix.runelite.farming.Produce;
+import com.mystix.runelite.hunter.BirdHouse;
+import com.mystix.runelite.hunter.BirdHouseData;
+import com.mystix.runelite.hunter.BirdHouseSpace;
+import com.mystix.runelite.hunter.BirdHouseState;
 import com.mystix.runelite.hunter.BirdHouseTracker;
 
 /**
@@ -219,27 +223,35 @@ public class TimerMonitor {
 			}
 		}
 
-		// Bird houses — have a single notify toggle in Time Tracking
-		if (birdHouseTracker.getSummary() == SummaryState.IN_PROGRESS) {
-			long completionTime = birdHouseTracker.getCompletionTime();
-			if (completionTime > 0) {
-				boolean birdHouseNotify = syncEnabled && isBirdHouseNotifyEnabled();
-				Instant completedAt = Instant.ofEpochSecond(completionTime);
-				// Bird house duration is 50 minutes (from BirdHouseTracker.BIRD_HOUSE_DURATION)
-				Instant startedAt = Instant.ofEpochSecond(completionTime - 50 * 60);
-				Integer birdHouseEntityId = birdHouseTracker.getEntityIdForCompletionTime(completionTime);
-				timers.add(new TimerSyncItem(
-						"bird house",
-						"fossil island",
-						"bird house",
-						completedAt,
-						birdHouseNotify,
-						playerUsername,
-						startedAt,
-						null,
-						birdHouseEntityId,
-						0));
+		// Bird houses — iterate each space for per-house timers
+		boolean birdHouseNotify = syncEnabled && isBirdHouseNotifyEnabled();
+		for (var bhEntry : birdHouseTracker.getBirdHouseData().entrySet()) {
+			BirdHouseSpace space = bhEntry.getKey();
+			BirdHouseData data = bhEntry.getValue();
+			if (BirdHouseState.fromVarpValue(data.getVarp()) != BirdHouseState.SEEDED) {
+				continue;
 			}
+			long spaceCompletionTime = data.getTimestamp() + BirdHouseTracker.BIRD_HOUSE_DURATION;
+			if (spaceCompletionTime <= Instant.now().getEpochSecond()) {
+				continue; // already done
+			}
+			Instant completedAt = Instant.ofEpochSecond(spaceCompletionTime);
+			Instant startedAt = Instant.ofEpochSecond(data.getTimestamp());
+			BirdHouse birdHouse = BirdHouse.fromVarpValue(data.getVarp());
+			Integer birdHouseEntityId = birdHouse != null ? birdHouse.getItemID() : null;
+			String entityName = birdHouse != null ? birdHouse.getName() : "Bird House";
+			String region = space.getName();
+			timers.add(new TimerSyncItem(
+					"bird house",
+					region,
+					entityName,
+					completedAt,
+					birdHouseNotify,
+					playerUsername,
+					startedAt,
+					null,
+					birdHouseEntityId,
+					space.getVarp()));
 		}
 
 		// Tears of Guthix — playable again 7 days after completion; timer set when

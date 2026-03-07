@@ -23,10 +23,11 @@ public class TimerSyncItemTest
 	@Test
 	public void testBirdHousePayloadToJson()
 	{
-		TimerSyncItem item = new TimerSyncItem("bird house", "fossil island", "bird house", Instant.ofEpochSecond(1700000100L), false, "Player1", null, null, null, 0);
+		TimerSyncItem item = new TimerSyncItem("bird house", "Mushroom Meadow", "Mushroom Meadow (North)", Instant.ofEpochSecond(1700000100L), false, "Player1", null, null, null, 1);
 		String json = TimersSyncPayload.toJson(java.util.Collections.singletonList(item));
 		assertTrue(json.contains("\"timer_type\":\"bird house\""));
-		assertTrue(json.contains("\"region\":\"fossil island\""));
+		assertTrue(json.contains("\"region\":\"mushroom meadow\""));
+		assertTrue(json.contains("\"entity\":\"mushroom meadow (north)\""));
 		assertTrue(json.contains("\"notifications_enabled\":false"));
 	}
 
@@ -75,7 +76,7 @@ public class TimerSyncItemTest
 	@Test
 	public void testCropStateOmittedWhenNull()
 	{
-		TimerSyncItem item = new TimerSyncItem("bird house", "fossil island", "bird house", Instant.ofEpochSecond(1700000000L), true, "TestPlayer", null, null, null, 0);
+		TimerSyncItem item = new TimerSyncItem("bird house", "Mushroom Meadow", "Mushroom Meadow (North)", Instant.ofEpochSecond(1700000000L), true, "TestPlayer", null, null, null, 1);
 		String json = TimersSyncPayload.toJson(java.util.Collections.singletonList(item));
 		assertTrue(!json.contains("\"crop_state\""));
 	}

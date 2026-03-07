@@ -11,6 +11,8 @@ alwaysApply: true
 This project lives at `mystix-plugin/` within the parent monorepo at `/Users/danielmurphy/Documents/mystix/`.
 
 - Backend: `../mystix-backend/`
+- Flutter: `../mystix-flutter/`
+- Landing: `../mystix-landing/`
 - Shared monorepo rules: `../.cursor/rules/monorepo-overview.mdc`
 
 ## Plugin-hub Compliance

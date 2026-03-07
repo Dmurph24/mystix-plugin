@@ -7,6 +7,8 @@ See parent [`../CLAUDE.md`](../CLAUDE.md) for monorepo layout and cross-project 
 This project lives at `mystix-plugin/` within the monorepo at `/Users/danielmurphy/Documents/mystix/`.
 
 - Backend: `../mystix-backend/`
+- Flutter: `../mystix-flutter/`
+- Landing: `../mystix-landing/`
 - Shared monorepo rules (Cursor): `../.cursor/rules/monorepo-overview.mdc`
 
 Java source: `src/main/java/com/mystix/`

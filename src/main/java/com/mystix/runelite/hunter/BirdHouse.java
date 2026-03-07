@@ -33,7 +33,7 @@ import net.runelite.api.gameval.ItemID;
 
 @AllArgsConstructor
 @Getter
-enum BirdHouse
+public enum BirdHouse
 {
 	NORMAL("Bird House", ItemID.BIRDHOUSE_NORMAL),
 	OAK("Oak Bird House", ItemID.BIRDHOUSE_OAK),
@@ -52,7 +52,7 @@ enum BirdHouse
 	 * Gets the {@code BirdHouse} corresponding to the given {@code VarPlayer} value.
 	 */
 	@Nullable
-	static BirdHouse fromVarpValue(int varp)
+	public static BirdHouse fromVarpValue(int varp)
 	{
 		int index = (varp - 1) / 3;
 

@@ -36,7 +36,6 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
-import lombok.AccessLevel;
 import lombok.Getter;
 import net.runelite.api.Client;
 import net.runelite.api.coords.WorldPoint;
@@ -48,7 +47,7 @@ import net.runelite.client.plugins.timetracking.TimeTrackingConfig;
 public class BirdHouseTracker
 {
 	// average time taken to harvest 10 birds, in seconds
-	static final int BIRD_HOUSE_DURATION = (int) Duration.ofMinutes(50).getSeconds();
+	public static final int BIRD_HOUSE_DURATION = (int) Duration.ofMinutes(50).getSeconds();
 
 	private static ImmutableSet<Integer> FOSSIL_ISLAND_REGIONS = ImmutableSet.of(14650, 14651, 14652, 14906, 14907, 15162, 15163);
 
@@ -58,7 +57,7 @@ public class BirdHouseTracker
 	private final TimeTrackingConfig config;
 	private final Notifier notifier;
 
-	@Getter(AccessLevel.PACKAGE)
+	@Getter
 	private final ConcurrentMap<BirdHouseSpace, BirdHouseData> birdHouseData = new ConcurrentHashMap<>();
 
 	@Getter

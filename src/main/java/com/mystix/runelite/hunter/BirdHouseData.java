@@ -32,7 +32,7 @@ import lombok.Value;
  * Contains data about the state of a particular {@link BirdHouseSpace}, at a particular point in time.
  */
 @Value
-class BirdHouseData
+public class BirdHouseData
 {
 	private BirdHouseSpace space;
 	private int varp;
