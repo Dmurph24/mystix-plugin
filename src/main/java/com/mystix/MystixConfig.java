@@ -25,4 +25,9 @@ public interface MystixConfig extends Config {
 	default boolean syncWiseOldMan() {
 		return true;
 	}
+
+	@ConfigItem(keyName = "syncLoadouts", name = "Sync Loadouts", description = "Sync your active equipment and Inventory Setups loadouts to Mystix.", position = 4)
+	default boolean syncLoadouts() {
+		return true;
+	}
 }

@@ -49,6 +49,9 @@ public class MystixPlugin extends Plugin {
 	private BankMemoryMonitor bankMemoryMonitor;
 
 	@Inject
+	private LoadoutMonitor loadoutMonitor;
+
+	@Inject
 	private WomSyncService womSyncService;
 
 	@Inject
@@ -95,6 +98,7 @@ public class MystixPlugin extends Plugin {
 
 		playerSkillsMonitor.start();
 		bankMemoryMonitor.start();
+		loadoutMonitor.start();
 
 		eventBus.register(this);
 
@@ -108,6 +112,7 @@ public class MystixPlugin extends Plugin {
 		timerMonitor.stop();
 		playerSkillsMonitor.stop();
 		bankMemoryMonitor.stop();
+		loadoutMonitor.stop();
 		lastUsername = null;
 		log.debug("Mystix stopped");
 	}
