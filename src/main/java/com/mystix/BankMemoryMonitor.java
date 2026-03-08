@@ -4,13 +4,16 @@ import com.mystix.api.MystixApiClient;
 import com.mystix.model.BankSyncPayload;
 import java.util.ArrayList;
 import java.util.EnumSet;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import javax.inject.Inject;
 import javax.inject.Singleton;
 import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.Client;
 import net.runelite.api.InventoryID;
 import net.runelite.api.Item;
+import net.runelite.api.ItemComposition;
 import net.runelite.api.ItemContainer;
 import net.runelite.api.Player;
 import net.runelite.api.WorldType;
@@ -91,22 +94,39 @@ public class BankMemoryMonitor {
 			return;
 		}
 
-		List<BankSyncPayload.BankItem> bankItems = new ArrayList<>();
-		Item[] items = bankContainer.getItems();
+		// Aggregate quantities by canonical item ID (handles bank + inventory merge)
+		Map<Integer, Integer> itemQuantities = new LinkedHashMap<>();
 
-		for (Item item : items) {
+		// Process bank items
+		for (Item item : bankContainer.getItems()) {
 			int itemId = item.getId();
 			int quantity = item.getQuantity();
 
-			// Skip empty slots
+			// Skip empty slots and placeholders (quantity 0)
 			if (itemId == -1 || quantity <= 0) {
+				continue;
+			}
+
+			// Skip bank placeholders
+			ItemComposition comp = itemManager.getItemComposition(itemId);
+			if (comp.getPlaceholderTemplateId() != -1) {
 				continue;
 			}
 
 			// Canonicalize noted items to their un-noted ID
 			int canonicalId = itemManager.canonicalize(itemId);
-			bankItems.add(new BankSyncPayload.BankItem(canonicalId, quantity));
+			itemQuantities.merge(canonicalId, quantity, Integer::sum);
 		}
+
+		// Include inventory items in the bank payload
+		collectContainerItems(InventoryID.INVENTORY, itemQuantities);
+
+		// Include equipped items in the bank payload
+		collectContainerItems(InventoryID.EQUIPMENT, itemQuantities);
+
+		// Build the payload from aggregated items
+		List<BankSyncPayload.BankItem> bankItems = new ArrayList<>();
+		itemQuantities.forEach((id, qty) -> bankItems.add(new BankSyncPayload.BankItem(id, qty)));
 
 		BankSyncPayload payload = new BankSyncPayload(playerUsername, bankItems);
 		String json = payload.toJson();
@@ -120,6 +140,29 @@ public class BankMemoryMonitor {
 		lastSyncJson = json;
 		log.info("Syncing {} bank items for player: {}", bankItems.size(), playerUsername);
 		apiClient.sendBankSync(payload);
+	}
+
+	/**
+	 * Collects items from the given container and merges them into the
+	 * aggregated quantities map, canonicalising item IDs and summing
+	 * duplicates.
+	 */
+	private void collectContainerItems(InventoryID containerId, Map<Integer, Integer> itemQuantities) {
+		ItemContainer container = client.getItemContainer(containerId);
+		if (container == null) {
+			return;
+		}
+		for (Item item : container.getItems()) {
+			int itemId = item.getId();
+			int quantity = item.getQuantity();
+
+			if (itemId == -1 || quantity <= 0) {
+				continue;
+			}
+
+			int canonicalId = itemManager.canonicalize(itemId);
+			itemQuantities.merge(canonicalId, quantity, Integer::sum);
+		}
 	}
 
 	/**
