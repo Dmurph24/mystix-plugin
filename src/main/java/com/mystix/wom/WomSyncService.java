@@ -63,7 +63,7 @@ public class WomSyncService
 					}
 					else
 					{
-						log.warn("Wise Old Man API returned {} for {}: {}", response.statusCode(), cleanName, response.body());
+						log.warn("Wise Old Man API returned {} for {}", response.statusCode(), cleanName);
 					}
 				})
 				.exceptionally(ex ->

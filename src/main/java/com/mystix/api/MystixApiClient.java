@@ -57,7 +57,6 @@ public class MystixApiClient
 
 		String url = API_BASE_URL.replaceAll("/$", "") + TIMERS_ENDPOINT;
 		String json = TimersSyncPayload.toJson(timers);
-		log.debug("Timers sync payload: {}", json);
 
 		try
 		{
@@ -78,7 +77,7 @@ public class MystixApiClient
 					}
 					else
 					{
-						log.warn("Mystix API returned {}: {}", response.statusCode(), response.body());
+						log.warn("Mystix API returned {} for timers sync", response.statusCode());
 					}
 				})
 				.exceptionally(ex ->
@@ -128,7 +127,7 @@ public class MystixApiClient
 					}
 					else
 					{
-						log.warn("Mystix API returned {} for skills sync: {}", response.statusCode(), response.body());
+						log.warn("Mystix API returned {} for skills sync", response.statusCode());
 					}
 				})
 				.exceptionally(ex ->
@@ -179,7 +178,7 @@ public class MystixApiClient
 					}
 					else
 					{
-						log.warn("Mystix API returned {} for loadout sync: {}", response.statusCode(), response.body());
+						log.warn("Mystix API returned {} for loadout sync", response.statusCode());
 					}
 				})
 				.exceptionally(ex ->
@@ -230,7 +229,7 @@ public class MystixApiClient
 					}
 					else
 					{
-						log.warn("Mystix API returned {} for bank sync: {}", response.statusCode(), response.body());
+						log.warn("Mystix API returned {} for bank sync", response.statusCode());
 					}
 				})
 				.exceptionally(ex ->
