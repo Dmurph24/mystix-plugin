@@ -9,3 +9,4 @@ nbactions.xml
 nb-configuration.xml
 nbproject/
 .vscode/settings.json
+node_modules/

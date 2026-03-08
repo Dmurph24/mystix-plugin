@@ -30,7 +30,7 @@ import com.mystix.runelite.hunter.BirdHouseTracker;
 import com.mystix.wom.WomSyncService;
 
 @Slf4j
-@PluginDescriptor(name = "Mystix")
+@PluginDescriptor(name = "Mystix", description = "Syncs Farming Timers, Bank, Skills, and Loadout data to the Mystix mobile app.")
 @PluginDependency(TimeTrackingPlugin.class)
 public class MystixPlugin extends Plugin {
 	@Inject
