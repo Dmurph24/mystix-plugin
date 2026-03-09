@@ -138,7 +138,9 @@ public class LoadoutMonitor {
 
 	@Subscribe
 	public void onItemContainerChanged(ItemContainerChanged event) {
-		if (event.getContainerId() != InventoryID.EQUIPMENT.getId()) {
+		int containerId = event.getContainerId();
+		if (containerId != InventoryID.EQUIPMENT.getId()
+				&& containerId != InventoryID.INVENTORY.getId()) {
 			return;
 		}
 
@@ -150,7 +152,7 @@ public class LoadoutMonitor {
 		if (debounceFuture != null) {
 			debounceFuture.cancel(false);
 		}
-		log.debug("Equipment changed, scheduling loadout sync in {}s", EQUIPMENT_CHANGE_DEBOUNCE_SECONDS);
+		log.debug("Equipment/inventory changed, scheduling loadout sync in {}s", EQUIPMENT_CHANGE_DEBOUNCE_SECONDS);
 		debounceFuture = executorService.schedule(() -> clientThread.invokeLater(this::syncLoadouts),
 				EQUIPMENT_CHANGE_DEBOUNCE_SECONDS, TimeUnit.SECONDS);
 	}
@@ -202,7 +204,7 @@ public class LoadoutMonitor {
 	}
 
 	/**
-	 * Builds the active gear loadout from the equipment container.
+	 * Builds the active gear loadout from the equipment and inventory containers.
 	 */
 	private LoadoutSyncPayload.LoadoutSet buildActiveGearLoadout() {
 		ItemContainer equipment = client.getItemContainer(InventoryID.EQUIPMENT);
@@ -228,13 +230,29 @@ public class LoadoutMonitor {
 			equipmentItems.add(new LoadoutSyncPayload.EquipmentItem(canonicalId, slot));
 		}
 
-		if (equipmentItems.isEmpty()) {
+		// Also capture the player's current inventory
+		List<LoadoutSyncPayload.InventoryItem> inventoryItems = new ArrayList<>();
+		ItemContainer inventory = client.getItemContainer(InventoryID.INVENTORY);
+		if (inventory != null) {
+			Item[] invItems = inventory.getItems();
+			for (int i = 0; i < invItems.length && i < 28; i++) {
+				Item item = invItems[i];
+				if (item.getId() == -1 || item.getQuantity() <= 0) {
+					continue;
+				}
+
+				int canonicalId = itemManager.canonicalize(item.getId());
+				inventoryItems.add(new LoadoutSyncPayload.InventoryItem(canonicalId, i));
+			}
+		}
+
+		if (equipmentItems.isEmpty() && inventoryItems.isEmpty()) {
 			return null;
 		}
 
 		return new LoadoutSyncPayload.LoadoutSet(
 				"Current Gear", "active_gear", null,
-				equipmentItems, new ArrayList<>());
+				equipmentItems, inventoryItems);
 	}
 
 	/**
