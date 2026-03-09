@@ -2,6 +2,21 @@
 
 A RuneLite plugin that syncs Time Tracking data to the Mystix app. Sends expected finish timestamps for farming patches and bird houses so the Mystix server can notify you when timers complete.
 
+## Installing the App
+
+The Mystix mobile app is currently in beta.
+
+- **iOS:** Install via TestFlight: https://testflight.apple.com/join/mGc4jcXW
+- **Android:** Android beta access requires your email to be added to an approved list of testers. If you are a reviewer and would like to look at the app, please respond in a PR comment and I can add you to the beta list.
+
+### How the Mystix App Works
+
+Mystix is a companion app for Old School RuneScape that receives gameplay data from the RuneLite plugin. The plugin sends data such as farming/bird house timer timestamps and skill levels to the Mystix server, which then delivers push notifications to your phone (e.g., when a farming patch is ready to harvest) and displays your character's stats.
+
+All data transmission is user-initiated and requires an App Key that you generate in the Mystix app. No data is sent without the plugin being configured with a valid key, and sync toggles let you control exactly what is shared.
+
+For full details on what information is collected and stored, see our [Privacy Policy](https://mystix.app/privacy).
+
 ## Setup
 
 1. Install the Mystix plugin from the Plugin Hub (or build from source).
