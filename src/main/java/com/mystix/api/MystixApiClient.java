@@ -1,5 +1,6 @@
 package com.mystix.api;
 
+import com.google.gson.Gson;
 import com.mystix.MystixConfig;
 import com.mystix.model.BankSyncPayload;
 import com.mystix.model.LoadoutSyncPayload;
@@ -31,12 +32,14 @@ public class MystixApiClient
 	private static final String LOADOUT_ENDPOINT = "/api/runelite/loadouts/";
 
 	private final MystixConfig config;
+	private final Gson gson;
 	private final HttpClient httpClient;
 
 	@Inject
-	public MystixApiClient(MystixConfig config)
+	public MystixApiClient(MystixConfig config, Gson gson)
 	{
 		this.config = config;
+		this.gson = gson;
 		this.httpClient = HttpClient.newBuilder()
 			.connectTimeout(REQUEST_TIMEOUT)
 			.build();
@@ -106,7 +109,7 @@ public class MystixApiClient
 		}
 
 		String url = API_BASE_URL.replaceAll("/$", "") + SKILLS_ENDPOINT;
-		String json = payload.toJson();
+		String json = payload.toJson(gson);
 
 		try
 		{
@@ -156,7 +159,7 @@ public class MystixApiClient
 		}
 
 		String url = API_BASE_URL.replaceAll("/$", "") + LOADOUT_ENDPOINT;
-		String json = payload.toJson();
+		String json = payload.toJson(gson);
 
 		try
 		{
@@ -207,7 +210,7 @@ public class MystixApiClient
 		}
 
 		String url = API_BASE_URL.replaceAll("/$", "") + BANK_ENDPOINT;
-		String json = payload.toJson();
+		String json = payload.toJson(gson);
 
 		try
 		{

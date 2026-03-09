@@ -75,6 +75,7 @@ public class LoadoutMonitor {
 	private final ScheduledExecutorService executorService;
 	private final ConfigManager configManager;
 	private final ItemManager itemManager;
+	private final Gson gson;
 
 	private GameState previousGameState = GameState.UNKNOWN;
 	private ScheduledFuture<?> debounceFuture = null;
@@ -89,7 +90,8 @@ public class LoadoutMonitor {
 			EventBus eventBus,
 			ScheduledExecutorService executorService,
 			ConfigManager configManager,
-			ItemManager itemManager) {
+			ItemManager itemManager,
+			Gson gson) {
 		this.client = client;
 		this.clientThread = clientThread;
 		this.config = config;
@@ -98,6 +100,7 @@ public class LoadoutMonitor {
 		this.executorService = executorService;
 		this.configManager = configManager;
 		this.itemManager = itemManager;
+		this.gson = gson;
 	}
 
 	public void start() {
@@ -190,7 +193,7 @@ public class LoadoutMonitor {
 		loadoutSets.addAll(inventorySetups);
 
 		LoadoutSyncPayload payload = new LoadoutSyncPayload(playerUsername, loadoutSets);
-		String json = payload.toJson();
+		String json = payload.toJson(gson);
 
 		// Deduplicate: only send if contents changed
 		if (json.equals(lastSyncJson)) {
@@ -261,7 +264,6 @@ public class LoadoutMonitor {
 	 */
 	private List<LoadoutSyncPayload.LoadoutSet> buildInventorySetups() {
 		List<LoadoutSyncPayload.LoadoutSet> setups = new ArrayList<>();
-		Gson gson = new Gson();
 
 		// Try V3 first (current format): each setup stored under "setupsV3_<hash>"
 		try {

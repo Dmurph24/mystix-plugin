@@ -1,5 +1,6 @@
 package com.mystix.api;
 
+import com.google.gson.Gson;
 import com.mystix.MystixConfig;
 import com.mystix.model.BankSyncPayload;
 import com.mystix.model.PlayerSkillsSyncPayload;
@@ -27,7 +28,7 @@ public class MystixApiClientTest {
 
 	@Test
 	public void testSendWithEmptyAppKeyDoesNotThrow() {
-		MystixApiClient client = new MystixApiClient(emptyKeyConfig());
+		MystixApiClient client = new MystixApiClient(emptyKeyConfig(), new Gson());
 		TimerSyncItem item = new TimerSyncItem("bird house", "fossil island", "bird house",
 				Instant.ofEpochSecond(1700000000L), true, "TestPlayer", null, null, null, 0);
 		client.sendTimersSync(Collections.singletonList(item));
@@ -51,7 +52,7 @@ public class MystixApiClientTest {
 
 	@Test
 	public void testSendPlayerSkillsWithEmptyAppKeyDoesNotThrow() {
-		MystixApiClient client = new MystixApiClient(emptyKeyConfig());
+		MystixApiClient client = new MystixApiClient(emptyKeyConfig(), new Gson());
 		Map<String, PlayerSkillsSyncPayload.SkillData> skills = new HashMap<>();
 		skills.put("Attack", new PlayerSkillsSyncPayload.SkillData(75, 1200000));
 		skills.put("Defence", new PlayerSkillsSyncPayload.SkillData(70, 800000));
@@ -62,7 +63,7 @@ public class MystixApiClientTest {
 
 	@Test
 	public void testSendBankSyncWithEmptyAppKeyDoesNotThrow() {
-		MystixApiClient client = new MystixApiClient(emptyKeyConfig());
+		MystixApiClient client = new MystixApiClient(emptyKeyConfig(), new Gson());
 		BankSyncPayload payload = new BankSyncPayload("TestPlayer",
 				Arrays.asList(new BankSyncPayload.BankItem(4151, 1)));
 		client.sendBankSync(payload);
@@ -76,7 +77,7 @@ public class MystixApiClientTest {
 		skills.put("Defence", new PlayerSkillsSyncPayload.SkillData(70, 800000));
 		skills.put("Strength", new PlayerSkillsSyncPayload.SkillData(80, 2000000));
 		PlayerSkillsSyncPayload payload = new PlayerSkillsSyncPayload("TestPlayer", skills, 225, 95);
-		String json = payload.toJson();
+		String json = payload.toJson(new Gson());
 
 		assertNotNull(json);
 		assertTrue(json.contains("\"player\":\"TestPlayer\""));

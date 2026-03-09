@@ -1,5 +1,6 @@
 package com.mystix;
 
+import com.google.gson.Gson;
 import com.mystix.api.MystixApiClient;
 import com.mystix.model.BankSyncPayload;
 import java.util.ArrayList;
@@ -36,6 +37,7 @@ public class BankMemoryMonitor {
 	private final MystixApiClient apiClient;
 	private final EventBus eventBus;
 	private final ItemManager itemManager;
+	private final Gson gson;
 
 	private String lastSyncJson = null;
 
@@ -45,12 +47,14 @@ public class BankMemoryMonitor {
 			MystixConfig config,
 			MystixApiClient apiClient,
 			EventBus eventBus,
-			ItemManager itemManager) {
+			ItemManager itemManager,
+			Gson gson) {
 		this.client = client;
 		this.config = config;
 		this.apiClient = apiClient;
 		this.eventBus = eventBus;
 		this.itemManager = itemManager;
+		this.gson = gson;
 	}
 
 	public void start() {
@@ -129,7 +133,7 @@ public class BankMemoryMonitor {
 		itemQuantities.forEach((id, qty) -> bankItems.add(new BankSyncPayload.BankItem(id, qty)));
 
 		BankSyncPayload payload = new BankSyncPayload(playerUsername, bankItems);
-		String json = payload.toJson();
+		String json = payload.toJson(gson);
 
 		// Deduplicate: only send if the bank contents changed
 		if (json.equals(lastSyncJson)) {

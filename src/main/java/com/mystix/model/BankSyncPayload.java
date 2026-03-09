@@ -24,8 +24,7 @@ public class BankSyncPayload {
 		return items;
 	}
 
-	public String toJson() {
-		Gson gson = new Gson();
+	public String toJson(Gson gson) {
 		return gson.toJson(this);
 	}
 

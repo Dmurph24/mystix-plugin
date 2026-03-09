@@ -3,6 +3,7 @@ package com.mystix.model;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 
+import com.google.gson.Gson;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -13,6 +14,7 @@ import org.junit.Test;
  * Tests for BankSyncPayload JSON serialization.
  */
 public class BankSyncPayloadTest {
+	private final Gson gson = new Gson();
 
 	@Test
 	public void testPayloadStructure() {
@@ -20,7 +22,7 @@ public class BankSyncPayloadTest {
 				new BankSyncPayload.BankItem(4151, 1),
 				new BankSyncPayload.BankItem(385, 500));
 		BankSyncPayload payload = new BankSyncPayload("TestPlayer", items);
-		String json = payload.toJson();
+		String json = payload.toJson(gson);
 
 		assertNotNull(json);
 		assertTrue(json.contains("\"player_username\":\"TestPlayer\""));
@@ -34,7 +36,7 @@ public class BankSyncPayloadTest {
 	@Test
 	public void testEmptyItemsList() {
 		BankSyncPayload payload = new BankSyncPayload("EmptyPlayer", Collections.emptyList());
-		String json = payload.toJson();
+		String json = payload.toJson(gson);
 
 		assertNotNull(json);
 		assertTrue(json.contains("\"player_username\":\"EmptyPlayer\""));
@@ -58,7 +60,7 @@ public class BankSyncPayloadTest {
 		BankSyncPayload.BankItem item = new BankSyncPayload.BankItem(995, 2147483647);
 		BankSyncPayload payload = new BankSyncPayload("RichPlayer",
 				Collections.singletonList(item));
-		String json = payload.toJson();
+		String json = payload.toJson(gson);
 
 		assertNotNull(json);
 		assertTrue(json.contains("\"item_id\":995"));

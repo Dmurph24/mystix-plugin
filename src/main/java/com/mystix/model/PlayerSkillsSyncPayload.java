@@ -36,8 +36,7 @@ public class PlayerSkillsSyncPayload {
 		return combat_level;
 	}
 
-	public String toJson() {
-		Gson gson = new Gson();
+	public String toJson(Gson gson) {
 		return gson.toJson(this);
 	}
 

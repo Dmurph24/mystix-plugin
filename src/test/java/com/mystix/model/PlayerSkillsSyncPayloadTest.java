@@ -34,7 +34,8 @@ public class PlayerSkillsSyncPayloadTest {
 		skills.put("Defence", new PlayerSkillsSyncPayload.SkillData(70, 800000));
 
 		PlayerSkillsSyncPayload payload = new PlayerSkillsSyncPayload("TestPlayer", skills, 145, 85);
-		String json = payload.toJson();
+		Gson gson = new Gson();
+		String json = payload.toJson(gson);
 
 		assertNotNull(json);
 		assertTrue(json.contains("TestPlayer"));
@@ -43,8 +44,6 @@ public class PlayerSkillsSyncPayloadTest {
 		assertTrue(json.contains("total_level"));
 		assertTrue(json.contains("combat_level"));
 		assertTrue(json.contains("current_xp"));
-
-		Gson gson = new Gson();
 		JsonObject jsonObject = gson.fromJson(json, JsonObject.class);
 		assertEquals("TestPlayer", jsonObject.get("player").getAsString());
 		assertEquals(145, jsonObject.get("total_level").getAsInt());
