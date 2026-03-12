@@ -7,7 +7,6 @@ import java.time.Instant;
 import java.time.ZoneOffset;
 import java.time.ZonedDateTime;
 import java.util.ArrayList;
-import java.util.EnumSet;
 import java.util.List;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
@@ -20,11 +19,8 @@ import net.runelite.client.eventbus.Subscribe;
 import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.Client;
 import net.runelite.api.GameState;
-import net.runelite.api.Player;
-import net.runelite.api.WorldType;
 import net.runelite.client.config.ConfigManager;
 import net.runelite.client.plugins.timetracking.TimeTrackingConfig;
-import net.runelite.client.plugins.timetracking.SummaryState;
 import com.mystix.runelite.farming.CropState;
 import com.mystix.runelite.farming.FarmingPatch;
 import com.mystix.runelite.farming.FarmingTracker;
@@ -36,19 +32,14 @@ import com.mystix.runelite.hunter.BirdHouseSpace;
 import com.mystix.runelite.hunter.BirdHouseState;
 import com.mystix.runelite.hunter.BirdHouseTracker;
 
-/**
- * Collects expected finish times from Time Tracking and sends them to the
- * Mystix API
- * so the server can schedule notifications when timers complete.
- * Only sends when timer data changes to avoid excess API calls.
- * Uses copied farming/hunter classes (see update.js) for per-patch names.
- */
 @Slf4j
 @Singleton
 public class TimerMonitor {
 	private static final int INITIAL_DELAY_SECONDS = 10;
 	private static final int SYNC_INTERVAL_SECONDS = 45;
 	private static final int LOGIN_SYNC_DELAY_SECONDS = 3;
+	private static final int TEARS_OF_GUTHIX_RESET_DAYS = 7;
+	private static final int LEAGUES_GROWTH_RATE_DIVISOR = 5;
 
 	private final Client client;
 	private final MystixConfig config;
@@ -121,9 +112,8 @@ public class TimerMonitor {
 	public void onGameStateChanged(GameStateChanged event) {
 		GameState newState = event.getGameState();
 		if (newState == GameState.LOGGED_IN && previousGameState != GameState.LOGGED_IN) {
-			// Defer sync so the local player and time-tracking data are ready
 			log.debug("Player logged in, scheduling timer sync in {}s", LOGIN_SYNC_DELAY_SECONDS);
-			lastSentSnapshot = null; // Force send on next sync
+			lastSentSnapshot = null;
 			executorService.schedule(this::sync, LOGIN_SYNC_DELAY_SECONDS, TimeUnit.SECONDS);
 		}
 		previousGameState = newState;
@@ -131,20 +121,22 @@ public class TimerMonitor {
 
 	/**
 	 * Called when the player enters the Tears of Guthix cave.
-	 * ToG is playable again 7 days after completion. Reset is rounded down to
-	 * the nearest day (00:00 UTC) for a clean weekly boundary.
+	 * ToG is playable again 7 days after completion, rounded down to 00:00 UTC.
 	 */
 	public void onTearsOfGuthixCompleted() {
 		ZonedDateTime nowUtc = Instant.now().atZone(ZoneOffset.UTC);
 		ZonedDateTime completionDayStart = nowUtc.toLocalDate().atStartOfDay(ZoneOffset.UTC);
-		Instant nextReset = completionDayStart.plusDays(7).toInstant();
-		tearsOfGuthixNextReset = nextReset;
-		lastSentSnapshot = null; // force sync on next tick
+		tearsOfGuthixNextReset = completionDayStart.plusDays(TEARS_OF_GUTHIX_RESET_DAYS).toInstant();
+		lastSentSnapshot = null;
 		log.info("Tears of Guthix completed; next reset at {}", tearsOfGuthixNextReset);
 	}
 
+	/**
+	 * Collects all timer data (farming, bird houses, Tears of Guthix) and sends
+	 * to the Mystix API if anything changed since the last sync.
+	 */
 	private void sync() {
-		if (config.mystixAppKey() == null || config.mystixAppKey().isBlank()) {
+		if (!SyncGuard.hasAppKey(config)) {
 			log.debug("Mystix sync skipped: no App Key configured");
 			return;
 		}
@@ -156,20 +148,17 @@ public class TimerMonitor {
 			log.debug("Mystix sync skipped: not logged in");
 			return;
 		}
-		if (isSpecialGameMode()) {
+		if (GameModeUtil.isSpecialGameMode(client)) {
 			log.debug("Mystix sync skipped: special game mode detected (Leagues, DMM, etc.)");
 			return;
 		}
 
-		Player localPlayer = client.getLocalPlayer();
-		String playerUsername = localPlayer != null ? localPlayer.getName() : null;
-		if (playerUsername == null || playerUsername.isBlank()) {
-			log.warn("Mystix sync skipped: could not get player username (localPlayer={})", localPlayer != null);
+		String playerUsername = SyncGuard.getPlayerUsername(client);
+		if (playerUsername == null) {
+			log.warn("Mystix sync skipped: could not get player username");
 			return;
 		}
 
-		// Refresh FarmingTracker from config (it only auto-updates when player is in a
-		// farming region)
 		farmingTracker.loadCompletionTimes();
 		birdHouseTracker.loadFromConfig();
 		birdHouseTracker.updateCompletionTime();
@@ -178,37 +167,43 @@ public class TimerMonitor {
 		boolean syncEnabled = config.syncTimeTracking();
 		List<TimerSyncItem> timers = new ArrayList<>();
 
-		// Per-patch timers with readable names (e.g. "Farming Guild", "Catherby")
-		// Each patch has its own bell/notification toggle in the Time Tracking panel
+		collectFarmingTimers(timers, playerUsername, syncEnabled);
+		collectBirdHouseTimers(timers, playerUsername, syncEnabled);
+		collectTearsOfGuthixTimer(timers, playerUsername, syncEnabled);
+
+		String snapshot = TimersSyncPayload.toJson(timers);
+		if (!snapshot.equals(lastSentSnapshot)) {
+			lastSentSnapshot = snapshot;
+			log.info("Mystix syncing {} timer(s) for {}", timers.size(), playerUsername);
+			apiClient.sendTimersSync(timers);
+		}
+	}
+
+	/**
+	 * Iterates all farming patches across all tabs, builds a TimerSyncItem for each
+	 * patch with a valid, in-progress prediction, and appends them to the timers list.
+	 */
+	private void collectFarmingTimers(List<TimerSyncItem> timers, String playerUsername, boolean syncEnabled) {
 		for (var entry : farmingWorld.getTabs().entrySet()) {
 			for (FarmingPatch patch : entry.getValue()) {
 				PatchPrediction prediction = farmingTracker.predictPatch(patch);
-				if (prediction == null || prediction.getProduce().getItemID() < 0) {
+				if (!isValidFarmingPrediction(prediction)) {
 					continue;
 				}
-				if (prediction.getProduce() == Produce.WEEDS || prediction.getProduce() == Produce.SCARECROW) {
-					continue;
-				}
-				// Skip EMPTY and FILLING - they have no meaningful completion timer.
-				if (prediction.getCropState() == CropState.EMPTY || prediction.getCropState() == CropState.FILLING) {
-					continue;
-				}
+
 				long doneEstimate = prediction.getDoneEstimate();
 				if (doneEstimate <= 0) {
 					continue;
 				}
+
 				boolean notificationsEnabled = syncEnabled && isFarmingNotifyEnabled(patch);
-				String regionName = patch.getRegion().getName();
-				if (regionName == null || regionName.isBlank()) {
-					regionName = entry.getKey().name().toLowerCase();
-				}
-				String tabName = entry.getKey().getName();
-				if (tabName == null || tabName.isBlank()) {
-					tabName = entry.getKey().name().toLowerCase();
-				}
+				String regionName = resolveRegionName(patch, entry.getKey());
+				String tabName = resolveTabName(entry.getKey());
+
 				Instant completedAt = Instant.ofEpochSecond(doneEstimate);
 				Instant startedAt = computeFarmingStartedAt(prediction, doneEstimate);
 				int produceItemId = prediction.getProduce().getItemID();
+
 				timers.add(new TimerSyncItem(
 						tabName,
 						regionName,
@@ -222,28 +217,63 @@ public class TimerMonitor {
 						patch.getVarbit()));
 			}
 		}
+	}
 
-		// Bird houses — iterate each space for per-house timers
+	private boolean isValidFarmingPrediction(PatchPrediction prediction) {
+		if (prediction == null || prediction.getProduce().getItemID() < 0) {
+			return false;
+		}
+		if (prediction.getProduce() == Produce.WEEDS || prediction.getProduce() == Produce.SCARECROW) {
+			return false;
+		}
+		return prediction.getCropState() != CropState.EMPTY && prediction.getCropState() != CropState.FILLING;
+	}
+
+	private String resolveRegionName(FarmingPatch patch, com.mystix.runelite.Tab tab) {
+		String regionName = patch.getRegion().getName();
+		if (regionName == null || regionName.isBlank()) {
+			return tab.name().toLowerCase();
+		}
+		return regionName;
+	}
+
+	private String resolveTabName(com.mystix.runelite.Tab tab) {
+		String tabName = tab.getName();
+		if (tabName == null || tabName.isBlank()) {
+			return tab.name().toLowerCase();
+		}
+		return tabName;
+	}
+
+	/**
+	 * Iterates bird house spaces, builds a TimerSyncItem for each seeded house
+	 * that has not yet completed, and appends them to the timers list.
+	 */
+	private void collectBirdHouseTimers(List<TimerSyncItem> timers, String playerUsername, boolean syncEnabled) {
 		boolean birdHouseNotify = syncEnabled && isBirdHouseNotifyEnabled();
+
 		for (var bhEntry : birdHouseTracker.getBirdHouseData().entrySet()) {
 			BirdHouseSpace space = bhEntry.getKey();
 			BirdHouseData data = bhEntry.getValue();
+
 			if (BirdHouseState.fromVarpValue(data.getVarp()) != BirdHouseState.SEEDED) {
 				continue;
 			}
+
 			long spaceCompletionTime = data.getTimestamp() + BirdHouseTracker.BIRD_HOUSE_DURATION;
 			if (spaceCompletionTime <= Instant.now().getEpochSecond()) {
-				continue; // already done
+				continue;
 			}
+
 			Instant completedAt = Instant.ofEpochSecond(spaceCompletionTime);
 			Instant startedAt = Instant.ofEpochSecond(data.getTimestamp());
 			BirdHouse birdHouse = BirdHouse.fromVarpValue(data.getVarp());
 			Integer birdHouseEntityId = birdHouse != null ? birdHouse.getItemID() : null;
 			String entityName = birdHouse != null ? birdHouse.getName() : "Bird House";
-			String region = space.getName();
+
 			timers.add(new TimerSyncItem(
 					"bird house",
-					region,
+					space.getName(),
 					entityName,
 					completedAt,
 					birdHouseNotify,
@@ -253,10 +283,9 @@ public class TimerMonitor {
 					birdHouseEntityId,
 					space.getVarp()));
 		}
+	}
 
-		// Tears of Guthix — playable again 7 days after completion; timer set when
-		// player enters cave
-		// No per-timer bell in RuneLite; use sync master switch
+	private void collectTearsOfGuthixTimer(List<TimerSyncItem> timers, String playerUsername, boolean syncEnabled) {
 		Instant togReset = tearsOfGuthixNextReset;
 		if (togReset != null && togReset.isAfter(Instant.now())) {
 			timers.add(new TimerSyncItem(
@@ -271,20 +300,8 @@ public class TimerMonitor {
 					null,
 					0));
 		}
-
-		String snapshot = TimersSyncPayload.toJson(timers);
-		if (!snapshot.equals(lastSentSnapshot)) {
-			lastSentSnapshot = snapshot;
-			log.info("Mystix syncing {} timer(s) for {}", timers.size(), playerUsername);
-			apiClient.sendTimersSync(timers);
-		}
 	}
 
-	/**
-	 * Reads the per-patch notification setting (bell icon) from Time Tracking
-	 * config.
-	 * Config key format matches FarmingPatch.notifyConfigKey().
-	 */
 	private boolean isFarmingNotifyEnabled(FarmingPatch patch) {
 		String notifyKey = TimeTrackingConfig.NOTIFY + "." + patch.getRegion().getRegionID() + "." + patch.getVarbit();
 		String profileKey = configManager.getRSProfileKey();
@@ -292,30 +309,19 @@ public class TimerMonitor {
 				.equals(configManager.getConfiguration(TimeTrackingConfig.CONFIG_GROUP, profileKey, notifyKey, Boolean.class));
 	}
 
-	/**
-	 * Reads the bird house notification toggle from Time Tracking config.
-	 */
 	private boolean isBirdHouseNotifyEnabled() {
 		return Boolean.TRUE.equals(configManager.getRSProfileConfiguration(TimeTrackingConfig.CONFIG_GROUP,
 				TimeTrackingConfig.BIRDHOUSE_NOTIFY, boolean.class));
 	}
 
 	/**
-	 * Checks if the player is on a special game mode world.
-	 * Special game modes (Leagues, DMM, Fresh Start, Tournaments, Beta,
-	 * Speedrunning)
-	 * use the same username as the main account but have separate progression
-	 * and should not sync to avoid data conflicts with main game data.
-	 */
-	/**
-	 * Computes started_at for a farming patch from completion time and growth
-	 * duration.
-	 * started_at = completed_at - (stages - 1) * tickrate * 60 seconds.
+	 * Computes started_at for a farming patch by subtracting the total growth
+	 * duration from the estimated completion time. Adjusts tick rate for Leagues worlds.
 	 */
 	private Instant computeFarmingStartedAt(PatchPrediction prediction, long doneEstimate) {
 		int tickRate = prediction.getProduce().getTickrate();
-		if (isLeaguesWorld()) {
-			tickRate = tickRate / 5;
+		if (GameModeUtil.isLeaguesWorld(client)) {
+			tickRate = tickRate / LEAGUES_GROWTH_RATE_DIVISOR;
 		}
 		int stages = prediction.getStages();
 		if (tickRate <= 0 || stages <= 1) {
@@ -323,21 +329,5 @@ public class TimerMonitor {
 		}
 		long growthSeconds = (long) (stages - 1) * tickRate * 60;
 		return Instant.ofEpochSecond(doneEstimate - growthSeconds);
-	}
-
-	private boolean isLeaguesWorld() {
-		EnumSet<WorldType> worldTypes = client.getWorldType();
-		return worldTypes.contains(WorldType.SEASONAL) && !worldTypes.contains(WorldType.DEADMAN);
-	}
-
-	private boolean isSpecialGameMode() {
-		EnumSet<WorldType> worldTypes = client.getWorldType();
-		return worldTypes.contains(WorldType.SEASONAL)
-				|| worldTypes.contains(WorldType.DEADMAN)
-				|| worldTypes.contains(WorldType.FRESH_START_WORLD)
-				|| worldTypes.contains(WorldType.TOURNAMENT_WORLD)
-				|| worldTypes.contains(WorldType.BETA_WORLD)
-				|| worldTypes.contains(WorldType.NOSAVE_MODE)
-				|| worldTypes.contains(WorldType.QUEST_SPEEDRUNNING);
 	}
 }

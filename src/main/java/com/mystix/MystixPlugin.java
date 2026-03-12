@@ -1,7 +1,6 @@
 package com.mystix;
 
 import com.google.inject.Provides;
-import java.util.EnumSet;
 import javax.inject.Inject;
 import javax.swing.SwingUtilities;
 import lombok.extern.slf4j.Slf4j;
@@ -9,7 +8,6 @@ import net.runelite.api.ChatMessageType;
 import net.runelite.api.Client;
 import net.runelite.api.GameState;
 import net.runelite.api.Player;
-import net.runelite.api.WorldType;
 import net.runelite.api.events.ChatMessage;
 import net.runelite.api.events.GameStateChanged;
 import net.runelite.client.Notifier;
@@ -33,6 +31,8 @@ import com.mystix.wom.WomSyncService;
 @PluginDescriptor(name = "Mystix", description = "Syncs Farming Timers, Bank, Skills, and Loadout data to the Mystix mobile app.")
 @PluginDependency(TimeTrackingPlugin.class)
 public class MystixPlugin extends Plugin {
+	private static final String TEARS_CAVE_MESSAGE = "Your stories have entertained me. I will let you into the cave for a short time.";
+
 	@Inject
 	private Client client;
 
@@ -66,7 +66,6 @@ public class MystixPlugin extends Plugin {
 	@Inject
 	private ItemManager itemManager;
 
-	// Track the last known username so we can submit an update on logout
 	private String lastUsername;
 
 	@Override
@@ -122,7 +121,7 @@ public class MystixPlugin extends Plugin {
 		if (!config.syncWiseOldMan()) {
 			return;
 		}
-		if (isSpecialGameMode()) {
+		if (GameModeUtil.isSpecialGameMode(client)) {
 			log.debug("WOM sync skipped: special game mode detected (Leagues, DMM, etc.)");
 			return;
 		}
@@ -130,7 +129,6 @@ public class MystixPlugin extends Plugin {
 		GameState state = event.getGameState();
 
 		if (state == GameState.LOGGED_IN) {
-			// Defer username lookup one tick so the local player is populated
 			Player local = client.getLocalPlayer();
 			if (local != null && local.getName() != null && !local.getName().isBlank()) {
 				lastUsername = local.getName();
@@ -143,8 +141,6 @@ public class MystixPlugin extends Plugin {
 			}
 		}
 	}
-
-	private static final String TEARS_CAVE_MESSAGE = "Your stories have entertained me. I will let you into the cave for a short time.";
 
 	@Subscribe
 	public void onChatMessage(ChatMessage event) {
@@ -160,23 +156,5 @@ public class MystixPlugin extends Plugin {
 	@Provides
 	MystixConfig provideConfig(ConfigManager configManager) {
 		return configManager.getConfig(MystixConfig.class);
-	}
-
-	/**
-	 * Checks if the player is on a special game mode world.
-	 * Special game modes (Leagues, DMM, Fresh Start, Tournaments, Beta,
-	 * Speedrunning)
-	 * use the same username as the main account but have separate progression
-	 * and should not sync to avoid data conflicts with main game data.
-	 */
-	private boolean isSpecialGameMode() {
-		EnumSet<WorldType> worldTypes = client.getWorldType();
-		return worldTypes.contains(WorldType.SEASONAL)
-				|| worldTypes.contains(WorldType.DEADMAN)
-				|| worldTypes.contains(WorldType.FRESH_START_WORLD)
-				|| worldTypes.contains(WorldType.TOURNAMENT_WORLD)
-				|| worldTypes.contains(WorldType.BETA_WORLD)
-				|| worldTypes.contains(WorldType.NOSAVE_MODE)
-				|| worldTypes.contains(WorldType.QUEST_SPEEDRUNNING);
 	}
 }
