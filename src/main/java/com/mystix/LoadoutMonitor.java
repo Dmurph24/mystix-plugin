@@ -7,7 +7,6 @@ import com.google.gson.JsonObject;
 import com.mystix.api.MystixApiClient;
 import com.mystix.model.LoadoutSyncPayload;
 import java.util.ArrayList;
-import java.util.EnumSet;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -19,38 +18,28 @@ import javax.inject.Singleton;
 import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.Client;
 import net.runelite.api.GameState;
-import net.runelite.api.InventoryID;
 import net.runelite.api.Item;
 import net.runelite.api.ItemContainer;
-import net.runelite.api.Player;
-import net.runelite.api.WorldType;
 import net.runelite.api.events.GameStateChanged;
 import net.runelite.api.events.ItemContainerChanged;
+import net.runelite.api.gameval.InventoryID;
 import net.runelite.client.config.ConfigManager;
 import net.runelite.client.callback.ClientThread;
 import net.runelite.client.eventbus.EventBus;
 import net.runelite.client.eventbus.Subscribe;
 import net.runelite.client.game.ItemManager;
 
-/**
- * Monitors player equipment and Inventory Setups, syncing loadout data
- * to the Mystix API. Syncs on:
- * - Login (3s delay)
- * - Logout (immediate)
- * - Equipment change (60s debounce)
- */
 @Slf4j
 @Singleton
 public class LoadoutMonitor {
 	private static final int LOGIN_SYNC_DELAY_SECONDS = 3;
 	private static final int EQUIPMENT_CHANGE_DEBOUNCE_SECONDS = 60;
+	private static final int EMPTY_SLOT_ID = -1;
+	private static final int MAX_INVENTORY_SLOTS = 28;
 
 	private static final String INVENTORY_SETUPS_CONFIG_GROUP = "inventorysetups";
 	private static final String SETUPS_V3_PREFIX = "setupsV3_";
 
-	/**
-	 * Maps RuneLite EquipmentInventorySlot indices to backend slot strings.
-	 */
 	private static final Map<Integer, String> EQUIPMENT_SLOT_MAP = new HashMap<>();
 
 	static {
@@ -142,8 +131,7 @@ public class LoadoutMonitor {
 	@Subscribe
 	public void onItemContainerChanged(ItemContainerChanged event) {
 		int containerId = event.getContainerId();
-		if (containerId != InventoryID.EQUIPMENT.getId()
-				&& containerId != InventoryID.INVENTORY.getId()) {
+		if (containerId != InventoryID.WORN && containerId != InventoryID.INV) {
 			return;
 		}
 
@@ -151,7 +139,6 @@ public class LoadoutMonitor {
 			return;
 		}
 
-		// Cancel any pending debounce and reschedule
 		if (debounceFuture != null) {
 			debounceFuture.cancel(false);
 		}
@@ -160,42 +147,41 @@ public class LoadoutMonitor {
 				EQUIPMENT_CHANGE_DEBOUNCE_SECONDS, TimeUnit.SECONDS);
 	}
 
+	/**
+	 * Builds the full loadout payload (active gear + Inventory Setups) and sends
+	 * it to the Mystix API if the contents changed since the last sync.
+	 */
 	private void syncLoadouts() {
-		if (config.mystixAppKey() == null || config.mystixAppKey().isBlank()) {
+		if (!SyncGuard.hasAppKey(config)) {
 			log.debug("Loadout sync skipped: no App Key configured");
 			return;
 		}
 		if (!config.syncLoadouts()) {
 			return;
 		}
-		if (isSpecialGameMode()) {
+		if (GameModeUtil.isSpecialGameMode(client)) {
 			log.debug("Loadout sync skipped: special game mode detected");
 			return;
 		}
 
-		Player localPlayer = client.getLocalPlayer();
-		String playerUsername = localPlayer != null ? localPlayer.getName() : null;
-		if (playerUsername == null || playerUsername.isBlank()) {
+		String playerUsername = SyncGuard.getPlayerUsername(client);
+		if (playerUsername == null) {
 			log.warn("Loadout sync skipped: could not get player username");
 			return;
 		}
 
 		List<LoadoutSyncPayload.LoadoutSet> loadoutSets = new ArrayList<>();
 
-		// Build active gear loadout
 		LoadoutSyncPayload.LoadoutSet activeGear = buildActiveGearLoadout();
 		if (activeGear != null) {
 			loadoutSets.add(activeGear);
 		}
 
-		// Build inventory setups from ConfigManager
-		List<LoadoutSyncPayload.LoadoutSet> inventorySetups = buildInventorySetups();
-		loadoutSets.addAll(inventorySetups);
+		loadoutSets.addAll(buildInventorySetups());
 
 		LoadoutSyncPayload payload = new LoadoutSyncPayload(playerUsername, loadoutSets);
 		String json = payload.toJson(gson);
 
-		// Deduplicate: only send if contents changed
 		if (json.equals(lastSyncJson)) {
 			log.debug("Loadout contents unchanged, skipping sync");
 			return;
@@ -207,43 +193,26 @@ public class LoadoutMonitor {
 	}
 
 	/**
-	 * Builds the active gear loadout from the equipment and inventory containers.
+	 * Reads the player's currently worn equipment and inventory, returning them
+	 * as an "active_gear" loadout set. Returns null if both are empty.
 	 */
 	private LoadoutSyncPayload.LoadoutSet buildActiveGearLoadout() {
-		ItemContainer equipment = client.getItemContainer(InventoryID.EQUIPMENT);
+		ItemContainer equipment = client.getItemContainer(InventoryID.WORN);
 		if (equipment == null) {
 			return null;
 		}
 
-		List<LoadoutSyncPayload.EquipmentItem> equipmentItems = new ArrayList<>();
-		Item[] items = equipment.getItems();
+		List<LoadoutSyncPayload.EquipmentItem> equipmentItems = parseEquipmentSlots(equipment.getItems());
 
-		for (int i = 0; i < items.length; i++) {
-			String slot = EQUIPMENT_SLOT_MAP.get(i);
-			if (slot == null) {
-				continue;
-			}
-
-			Item item = items[i];
-			if (item.getId() == -1 || item.getQuantity() <= 0) {
-				continue;
-			}
-
-			int canonicalId = itemManager.canonicalize(item.getId());
-			equipmentItems.add(new LoadoutSyncPayload.EquipmentItem(canonicalId, slot));
-		}
-
-		// Also capture the player's current inventory
 		List<LoadoutSyncPayload.InventoryItem> inventoryItems = new ArrayList<>();
-		ItemContainer inventory = client.getItemContainer(InventoryID.INVENTORY);
+		ItemContainer inventory = client.getItemContainer(InventoryID.INV);
 		if (inventory != null) {
 			Item[] invItems = inventory.getItems();
-			for (int i = 0; i < invItems.length && i < 28; i++) {
+			for (int i = 0; i < invItems.length && i < MAX_INVENTORY_SLOTS; i++) {
 				Item item = invItems[i];
-				if (item.getId() == -1 || item.getQuantity() <= 0) {
+				if (item.getId() == EMPTY_SLOT_ID || item.getQuantity() <= 0) {
 					continue;
 				}
-
 				int canonicalId = itemManager.canonicalize(item.getId());
 				inventoryItems.add(new LoadoutSyncPayload.InventoryItem(canonicalId, i));
 			}
@@ -258,53 +227,86 @@ public class LoadoutMonitor {
 				equipmentItems, inventoryItems);
 	}
 
+	private List<LoadoutSyncPayload.EquipmentItem> parseEquipmentSlots(Item[] items) {
+		List<LoadoutSyncPayload.EquipmentItem> equipmentItems = new ArrayList<>();
+		for (int i = 0; i < items.length; i++) {
+			String slot = EQUIPMENT_SLOT_MAP.get(i);
+			if (slot == null) {
+				continue;
+			}
+			Item item = items[i];
+			if (item.getId() == EMPTY_SLOT_ID || item.getQuantity() <= 0) {
+				continue;
+			}
+			int canonicalId = itemManager.canonicalize(item.getId());
+			equipmentItems.add(new LoadoutSyncPayload.EquipmentItem(canonicalId, slot));
+		}
+		return equipmentItems;
+	}
+
 	/**
-	 * Reads Inventory Setups data from ConfigManager and builds loadout sets.
-	 * Supports V3 (current, per-setup keys), V2, and V1 (legacy single-array) formats.
+	 * Reads saved Inventory Setups from ConfigManager. Tries V3 format first,
+	 * falling back to legacy V2/V1 formats if V3 is unavailable.
 	 */
 	private List<LoadoutSyncPayload.LoadoutSet> buildInventorySetups() {
 		List<LoadoutSyncPayload.LoadoutSet> setups = new ArrayList<>();
 
-		// Try V3 first (current format): each setup stored under "setupsV3_<hash>"
+		if (tryLoadV3Setups(setups)) {
+			return setups;
+		}
+
+		loadLegacySetups(setups);
+		return setups;
+	}
+
+	/**
+	 * Attempts to load Inventory Setups using the V3 per-setup key format.
+	 * Returns true if V3 keys were found (even if parsing individual setups fails).
+	 */
+	private boolean tryLoadV3Setups(List<LoadoutSyncPayload.LoadoutSet> setups) {
 		try {
 			String wholePrefix = ConfigManager.getWholeKey(INVENTORY_SETUPS_CONFIG_GROUP, null, SETUPS_V3_PREFIX);
 			List<String> v3Keys = configManager.getConfigurationKeys(wholePrefix);
-			if (v3Keys != null && !v3Keys.isEmpty()) {
-				log.debug("Found {} Inventory Setups (V3 format)", v3Keys.size());
-
-				// Load sections to map setup names -> categories
-				Map<String, String> sectionMap = loadSectionMap(gson);
-
-				for (String fullKey : v3Keys) {
-					// Extract the config key after the group prefix ("inventorysetups.")
-					String configKey = fullKey.substring(INVENTORY_SETUPS_CONFIG_GROUP.length() + 1);
-					String setupJson = configManager.getConfiguration(INVENTORY_SETUPS_CONFIG_GROUP, configKey);
-					if (setupJson == null || setupJson.isBlank()) {
-						continue;
-					}
-					try {
-						JsonObject setup = gson.fromJson(setupJson, JsonObject.class);
-						LoadoutSyncPayload.LoadoutSet loadoutSet = parseInventorySetupV3(setup, sectionMap);
-						if (loadoutSet != null) {
-							setups.add(loadoutSet);
-						}
-					} catch (Exception e) {
-						log.debug("Failed to parse V3 setup key {}: {}", configKey, e.getMessage());
-					}
-				}
-				return setups;
+			if (v3Keys == null || v3Keys.isEmpty()) {
+				return false;
 			}
+
+			log.debug("Found {} Inventory Setups (V3 format)", v3Keys.size());
+			Map<String, String> sectionMap = loadSectionMap();
+
+			for (String fullKey : v3Keys) {
+				String configKey = fullKey.substring(INVENTORY_SETUPS_CONFIG_GROUP.length() + 1);
+				String setupJson = configManager.getConfiguration(INVENTORY_SETUPS_CONFIG_GROUP, configKey);
+				if (setupJson == null || setupJson.isBlank()) {
+					continue;
+				}
+				try {
+					JsonObject setup = gson.fromJson(setupJson, JsonObject.class);
+					LoadoutSyncPayload.LoadoutSet loadoutSet = parseInventorySetupV3(setup, sectionMap);
+					if (loadoutSet != null) {
+						setups.add(loadoutSet);
+					}
+				} catch (Exception e) {
+					log.debug("Failed to parse V3 setup key {}: {}", configKey, e.getMessage());
+				}
+			}
+			return true;
 		} catch (Exception e) {
 			log.debug("V3 Inventory Setups read failed: {}", e.getMessage());
+			return false;
 		}
+	}
 
-		// Fall back to V2, then V1 (legacy single-array formats)
+	/**
+	 * Loads Inventory Setups from legacy V2 or V1 single-array config format.
+	 */
+	private void loadLegacySetups(List<LoadoutSyncPayload.LoadoutSet> setups) {
 		String setupsJson = configManager.getConfiguration(INVENTORY_SETUPS_CONFIG_GROUP, "setupsV2");
 		if (setupsJson == null || setupsJson.isBlank()) {
 			setupsJson = configManager.getConfiguration(INVENTORY_SETUPS_CONFIG_GROUP, "setups");
 		}
 		if (setupsJson == null || setupsJson.isBlank()) {
-			return setups;
+			return;
 		}
 
 		try {
@@ -312,7 +314,7 @@ public class LoadoutMonitor {
 			log.debug("Found {} Inventory Setups (legacy format)", setupsArray.size());
 			for (JsonElement element : setupsArray) {
 				JsonObject setup = element.getAsJsonObject();
-				LoadoutSyncPayload.LoadoutSet loadoutSet = parseInventorySetup(setup);
+				LoadoutSyncPayload.LoadoutSet loadoutSet = parseLegacySetup(setup);
 				if (loadoutSet != null) {
 					setups.add(loadoutSet);
 				}
@@ -320,14 +322,13 @@ public class LoadoutMonitor {
 		} catch (Exception e) {
 			log.warn("Failed to parse Inventory Setups data: {}", e.getMessage());
 		}
-
-		return setups;
 	}
 
 	/**
-	 * Loads the sections config and builds a map of setup name -> section name.
+	 * Reads the Inventory Setups sections config and builds a map of
+	 * setup name to section/category name for folder grouping.
 	 */
-	private Map<String, String> loadSectionMap(Gson gson) {
+	private Map<String, String> loadSectionMap() {
 		Map<String, String> sectionMap = new HashMap<>();
 		try {
 			String sectionsJson = configManager.getConfiguration(INVENTORY_SETUPS_CONFIG_GROUP, "sections");
@@ -350,133 +351,98 @@ public class LoadoutMonitor {
 		return sectionMap;
 	}
 
-	/**
-	 * Parses a V3 Inventory Setup JSON object (uses "eq"/"inv" field names, null for empty slots).
-	 */
 	private LoadoutSyncPayload.LoadoutSet parseInventorySetupV3(JsonObject setup, Map<String, String> sectionMap) {
-		String name = setup.has("name") ? setup.get("name").getAsString() : "Unnamed Setup";
+		String name = getJsonString(setup, "name", "Unnamed Setup");
 		String category = sectionMap.getOrDefault(name, null);
 
-		List<LoadoutSyncPayload.EquipmentItem> equipmentItems = new ArrayList<>();
-		List<LoadoutSyncPayload.InventoryItem> inventoryItems = new ArrayList<>();
-
-		// V3 uses "eq" for equipment
-		if (setup.has("eq") && !setup.get("eq").isJsonNull()) {
-			JsonArray eqArray = setup.getAsJsonArray("eq");
-			for (int i = 0; i < eqArray.size(); i++) {
-				if (eqArray.get(i).isJsonNull()) {
-					continue;
-				}
-				JsonObject eq = eqArray.get(i).getAsJsonObject();
-				int itemId = eq.has("id") ? eq.get("id").getAsInt() : -1;
-				if (itemId <= 0) {
-					continue;
-				}
-
-				String slot = EQUIPMENT_SLOT_MAP.get(i);
-				if (slot == null) {
-					continue;
-				}
-
-				int canonicalId = itemManager.canonicalize(itemId);
-				equipmentItems.add(new LoadoutSyncPayload.EquipmentItem(canonicalId, slot));
-			}
-		}
-
-		// V3 uses "inv" for inventory
-		if (setup.has("inv") && !setup.get("inv").isJsonNull()) {
-			JsonArray invArray = setup.getAsJsonArray("inv");
-			for (int i = 0; i < invArray.size(); i++) {
-				if (invArray.get(i).isJsonNull()) {
-					continue;
-				}
-				JsonObject inv = invArray.get(i).getAsJsonObject();
-				int itemId = inv.has("id") ? inv.get("id").getAsInt() : -1;
-				if (itemId <= 0) {
-					continue;
-				}
-
-				int canonicalId = itemManager.canonicalize(itemId);
-				inventoryItems.add(new LoadoutSyncPayload.InventoryItem(canonicalId, i));
-			}
-		}
+		List<LoadoutSyncPayload.EquipmentItem> equipmentItems = parseJsonEquipmentArray(setup, "eq");
+		List<LoadoutSyncPayload.InventoryItem> inventoryItems = parseJsonInventoryArray(setup, "inv");
 
 		if (equipmentItems.isEmpty() && inventoryItems.isEmpty()) {
 			return null;
 		}
 
-		return new LoadoutSyncPayload.LoadoutSet(
-				name, "inventory_setup", category,
-				equipmentItems, inventoryItems);
+		return new LoadoutSyncPayload.LoadoutSet(name, "inventory_setup", category, equipmentItems, inventoryItems);
 	}
 
-	/**
-	 * Parses a legacy (V1/V2) Inventory Setup JSON object into a LoadoutSet.
-	 */
-	private LoadoutSyncPayload.LoadoutSet parseInventorySetup(JsonObject setup) {
-		String name = setup.has("name") ? setup.get("name").getAsString() : "Unnamed Setup";
+	private LoadoutSyncPayload.LoadoutSet parseLegacySetup(JsonObject setup) {
+		String name = getJsonString(setup, "name", "Unnamed Setup");
 
 		String category = null;
 		if (setup.has("stackName") && !setup.get("stackName").isJsonNull()) {
 			category = setup.get("stackName").getAsString();
 		}
 
-		List<LoadoutSyncPayload.EquipmentItem> equipmentItems = new ArrayList<>();
-		List<LoadoutSyncPayload.InventoryItem> inventoryItems = new ArrayList<>();
-
-		if (setup.has("equipment") && !setup.get("equipment").isJsonNull()) {
-			JsonArray equipmentArray = setup.getAsJsonArray("equipment");
-			for (int i = 0; i < equipmentArray.size(); i++) {
-				JsonObject eq = equipmentArray.get(i).getAsJsonObject();
-				int itemId = eq.has("id") ? eq.get("id").getAsInt() : -1;
-				if (itemId <= 0) {
-					continue;
-				}
-
-				String slot = EQUIPMENT_SLOT_MAP.get(i);
-				if (slot == null) {
-					continue;
-				}
-
-				int canonicalId = itemManager.canonicalize(itemId);
-				equipmentItems.add(new LoadoutSyncPayload.EquipmentItem(canonicalId, slot));
-			}
-		}
-
-		if (setup.has("inventory") && !setup.get("inventory").isJsonNull()) {
-			JsonArray inventoryArray = setup.getAsJsonArray("inventory");
-			for (int i = 0; i < inventoryArray.size(); i++) {
-				JsonObject inv = inventoryArray.get(i).getAsJsonObject();
-				int itemId = inv.has("id") ? inv.get("id").getAsInt() : -1;
-				if (itemId <= 0) {
-					continue;
-				}
-
-				int canonicalId = itemManager.canonicalize(itemId);
-				inventoryItems.add(new LoadoutSyncPayload.InventoryItem(canonicalId, i));
-			}
-		}
+		List<LoadoutSyncPayload.EquipmentItem> equipmentItems = parseJsonEquipmentArray(setup, "equipment");
+		List<LoadoutSyncPayload.InventoryItem> inventoryItems = parseJsonInventoryArray(setup, "inventory");
 
 		if (equipmentItems.isEmpty() && inventoryItems.isEmpty()) {
 			return null;
 		}
 
-		return new LoadoutSyncPayload.LoadoutSet(
-				name, "inventory_setup", category,
-				equipmentItems, inventoryItems);
+		return new LoadoutSyncPayload.LoadoutSet(name, "inventory_setup", category, equipmentItems, inventoryItems);
 	}
 
 	/**
-	 * Checks if the player is on a special game mode world.
+	 * Parses a JSON array of equipment items from the given field, mapping each
+	 * slot index to a named equipment slot via EQUIPMENT_SLOT_MAP.
 	 */
-	private boolean isSpecialGameMode() {
-		EnumSet<WorldType> worldTypes = client.getWorldType();
-		return worldTypes.contains(WorldType.SEASONAL)
-				|| worldTypes.contains(WorldType.DEADMAN)
-				|| worldTypes.contains(WorldType.FRESH_START_WORLD)
-				|| worldTypes.contains(WorldType.TOURNAMENT_WORLD)
-				|| worldTypes.contains(WorldType.BETA_WORLD)
-				|| worldTypes.contains(WorldType.NOSAVE_MODE)
-				|| worldTypes.contains(WorldType.QUEST_SPEEDRUNNING);
+	private List<LoadoutSyncPayload.EquipmentItem> parseJsonEquipmentArray(JsonObject setup, String fieldName) {
+		List<LoadoutSyncPayload.EquipmentItem> items = new ArrayList<>();
+		if (!setup.has(fieldName) || setup.get(fieldName).isJsonNull()) {
+			return items;
+		}
+
+		JsonArray array = setup.getAsJsonArray(fieldName);
+		for (int i = 0; i < array.size(); i++) {
+			if (array.get(i).isJsonNull()) {
+				continue;
+			}
+			JsonObject eq = array.get(i).getAsJsonObject();
+			int itemId = eq.has("id") ? eq.get("id").getAsInt() : EMPTY_SLOT_ID;
+			if (itemId <= 0) {
+				continue;
+			}
+
+			String slot = EQUIPMENT_SLOT_MAP.get(i);
+			if (slot == null) {
+				continue;
+			}
+
+			int canonicalId = itemManager.canonicalize(itemId);
+			items.add(new LoadoutSyncPayload.EquipmentItem(canonicalId, slot));
+		}
+		return items;
+	}
+
+	/**
+	 * Parses a JSON array of inventory items from the given field, preserving
+	 * each item's slot index position.
+	 */
+	private List<LoadoutSyncPayload.InventoryItem> parseJsonInventoryArray(JsonObject setup, String fieldName) {
+		List<LoadoutSyncPayload.InventoryItem> items = new ArrayList<>();
+		if (!setup.has(fieldName) || setup.get(fieldName).isJsonNull()) {
+			return items;
+		}
+
+		JsonArray array = setup.getAsJsonArray(fieldName);
+		for (int i = 0; i < array.size(); i++) {
+			if (array.get(i).isJsonNull()) {
+				continue;
+			}
+			JsonObject inv = array.get(i).getAsJsonObject();
+			int itemId = inv.has("id") ? inv.get("id").getAsInt() : EMPTY_SLOT_ID;
+			if (itemId <= 0) {
+				continue;
+			}
+
+			int canonicalId = itemManager.canonicalize(itemId);
+			items.add(new LoadoutSyncPayload.InventoryItem(canonicalId, i));
+		}
+		return items;
+	}
+
+	private String getJsonString(JsonObject obj, String key, String defaultValue) {
+		return obj.has(key) ? obj.get(key).getAsString() : defaultValue;
 	}
 }

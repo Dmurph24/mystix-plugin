@@ -2,6 +2,7 @@ package com.mystix.api;
 
 import com.google.gson.Gson;
 import com.mystix.MystixConfig;
+import com.mystix.SyncGuard;
 import com.mystix.model.BankSyncPayload;
 import com.mystix.model.LoadoutSyncPayload;
 import com.mystix.model.PlayerSkillsSyncPayload;
@@ -13,13 +14,11 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
 import java.util.List;
+import java.util.function.Consumer;
 import javax.inject.Inject;
 import javax.inject.Singleton;
 import lombok.extern.slf4j.Slf4j;
 
-/**
- * Sends bulk timer sync to the Mystix API with X-RuneLite-Key header authorization.
- */
 @Slf4j
 @Singleton
 public class MystixApiClient
@@ -30,6 +29,9 @@ public class MystixApiClient
 	private static final String SKILLS_ENDPOINT = "/api/runelite/skills/";
 	private static final String BANK_ENDPOINT = "/api/runelite/bank/";
 	private static final String LOADOUT_ENDPOINT = "/api/runelite/loadouts/";
+
+	private static final int HTTP_OK_MIN = 200;
+	private static final int HTTP_OK_MAX = 300;
 
 	private final MystixConfig config;
 	private final Gson gson;
@@ -45,172 +47,47 @@ public class MystixApiClient
 			.build();
 	}
 
-	/**
-	 * Sends bulk timer sync to the Mystix API. Runs asynchronously to avoid blocking.
-	 * Logs errors without affecting RuneLite stability.
-	 */
 	public void sendTimersSync(List<TimerSyncItem> timers)
 	{
-		String appKey = config.mystixAppKey();
-		if (appKey == null || appKey.isBlank())
-		{
-			log.debug("Skipping API send: no Mystix App Key configured");
-			return;
-		}
-
-		String url = API_BASE_URL.replaceAll("/$", "") + TIMERS_ENDPOINT;
 		String json = TimersSyncPayload.toJson(timers);
-
-		try
-		{
-			HttpRequest request = HttpRequest.newBuilder()
-				.uri(URI.create(url))
-				.header("Content-Type", "application/json")
-				.header("X-RuneLite-Key", appKey.trim())
-				.timeout(REQUEST_TIMEOUT)
-				.POST(HttpRequest.BodyPublishers.ofString(json))
-				.build();
-
-			httpClient.sendAsync(request, HttpResponse.BodyHandlers.ofString())
-				.thenAccept(response ->
-				{
-					if (response.statusCode() >= 200 && response.statusCode() < 300)
-					{
-						log.info("Mystix timers sync successful: {} timers", timers.size());
-					}
-					else
-					{
-						log.warn("Mystix API returned {} for timers sync", response.statusCode());
-					}
-				})
-				.exceptionally(ex ->
-				{
-					log.warn("Failed to send timers sync to Mystix API: {}", ex.getMessage());
-					return null;
-				});
-		}
-		catch (Exception e)
-		{
-			log.warn("Failed to send timers sync: {}", e.getMessage());
-		}
+		postAsync(TIMERS_ENDPOINT, json, "timers",
+			response -> log.info("Mystix timers sync successful: {} timers", timers.size()));
 	}
 
-	/**
-	 * Sends player skills sync to the Mystix API. Runs asynchronously to avoid blocking.
-	 * Logs errors without affecting RuneLite stability.
-	 */
 	public void sendPlayerSkillsSync(PlayerSkillsSyncPayload payload)
 	{
-		String appKey = config.mystixAppKey();
-		if (appKey == null || appKey.isBlank())
-		{
-			log.debug("Skipping player skills sync: no Mystix App Key configured");
-			return;
-		}
-
-		String url = API_BASE_URL.replaceAll("/$", "") + SKILLS_ENDPOINT;
-		String json = payload.toJson(gson);
-
-		try
-		{
-			HttpRequest request = HttpRequest.newBuilder()
-				.uri(URI.create(url))
-				.header("Content-Type", "application/json")
-				.header("X-RuneLite-Key", appKey.trim())
-				.timeout(REQUEST_TIMEOUT)
-				.POST(HttpRequest.BodyPublishers.ofString(json))
-				.build();
-
-			httpClient.sendAsync(request, HttpResponse.BodyHandlers.ofString())
-				.thenAccept(response ->
-				{
-					if (response.statusCode() >= 200 && response.statusCode() < 300)
-					{
-						log.info("Mystix player skills sync successful for player: {}", payload.getPlayer());
-					}
-					else
-					{
-						log.warn("Mystix API returned {} for skills sync", response.statusCode());
-					}
-				})
-				.exceptionally(ex ->
-				{
-					log.warn("Failed to send player skills sync to Mystix API: {}", ex.getMessage());
-					return null;
-				});
-		}
-		catch (Exception e)
-		{
-			log.warn("Failed to send player skills sync: {}", e.getMessage());
-		}
+		postAsync(SKILLS_ENDPOINT, payload.toJson(gson), "skills",
+			response -> log.info("Mystix player skills sync successful for player: {}", payload.getPlayer()));
 	}
 
-	/**
-	 * Sends loadout sync to the Mystix API. Runs asynchronously to avoid blocking.
-	 * Logs errors without affecting RuneLite stability.
-	 */
 	public void sendLoadoutSync(LoadoutSyncPayload payload)
 	{
-		String appKey = config.mystixAppKey();
-		if (appKey == null || appKey.isBlank())
-		{
-			log.debug("Skipping loadout sync: no Mystix App Key configured");
-			return;
-		}
+		postAsync(LOADOUT_ENDPOINT, payload.toJson(gson), "loadout",
+			response -> log.info("Mystix loadout sync successful for player: {}", payload.getPlayerUsername()));
+	}
 
-		String url = API_BASE_URL.replaceAll("/$", "") + LOADOUT_ENDPOINT;
-		String json = payload.toJson(gson);
-
-		try
-		{
-			HttpRequest request = HttpRequest.newBuilder()
-				.uri(URI.create(url))
-				.header("Content-Type", "application/json")
-				.header("X-RuneLite-Key", appKey.trim())
-				.timeout(REQUEST_TIMEOUT)
-				.POST(HttpRequest.BodyPublishers.ofString(json))
-				.build();
-
-			httpClient.sendAsync(request, HttpResponse.BodyHandlers.ofString())
-				.thenAccept(response ->
-				{
-					if (response.statusCode() >= 200 && response.statusCode() < 300)
-					{
-						log.info("Mystix loadout sync successful for player: {}",
-							payload.getPlayerUsername());
-					}
-					else
-					{
-						log.warn("Mystix API returned {} for loadout sync", response.statusCode());
-					}
-				})
-				.exceptionally(ex ->
-				{
-					log.warn("Failed to send loadout sync to Mystix API: {}", ex.getMessage());
-					return null;
-				});
-		}
-		catch (Exception e)
-		{
-			log.warn("Failed to send loadout sync: {}", e.getMessage());
-		}
+	public void sendBankSync(BankSyncPayload payload)
+	{
+		postAsync(BANK_ENDPOINT, payload.toJson(gson), "bank",
+			response -> log.info("Mystix bank sync successful: {} items for player: {}",
+				payload.getItems().size(), payload.getPlayerUsername()));
 	}
 
 	/**
-	 * Sends bank sync to the Mystix API. Runs asynchronously to avoid blocking.
-	 * Logs errors without affecting RuneLite stability.
+	 * Posts a JSON payload to the given API endpoint asynchronously. Validates the app key,
+	 * builds the request with auth headers, and delegates success/error handling to callbacks.
 	 */
-	public void sendBankSync(BankSyncPayload payload)
+	private void postAsync(String endpoint, String json, String syncType,
+		Consumer<HttpResponse<String>> onSuccess)
 	{
 		String appKey = config.mystixAppKey();
-		if (appKey == null || appKey.isBlank())
+		if (!SyncGuard.hasAppKey(config))
 		{
-			log.debug("Skipping bank sync: no Mystix App Key configured");
+			log.debug("Skipping {} sync: no Mystix App Key configured", syncType);
 			return;
 		}
 
-		String url = API_BASE_URL.replaceAll("/$", "") + BANK_ENDPOINT;
-		String json = payload.toJson(gson);
+		String url = API_BASE_URL + endpoint;
 
 		try
 		{
@@ -225,25 +102,24 @@ public class MystixApiClient
 			httpClient.sendAsync(request, HttpResponse.BodyHandlers.ofString())
 				.thenAccept(response ->
 				{
-					if (response.statusCode() >= 200 && response.statusCode() < 300)
+					if (response.statusCode() >= HTTP_OK_MIN && response.statusCode() < HTTP_OK_MAX)
 					{
-						log.info("Mystix bank sync successful: {} items for player: {}",
-							payload.getItems().size(), payload.getPlayerUsername());
+						onSuccess.accept(response);
 					}
 					else
 					{
-						log.warn("Mystix API returned {} for bank sync", response.statusCode());
+						log.warn("Mystix API returned {} for {} sync", response.statusCode(), syncType);
 					}
 				})
 				.exceptionally(ex ->
 				{
-					log.warn("Failed to send bank sync to Mystix API: {}", ex.getMessage());
+					log.warn("Failed to send {} sync to Mystix API: {}", syncType, ex.getMessage());
 					return null;
 				});
 		}
 		catch (Exception e)
 		{
-			log.warn("Failed to send bank sync: {}", e.getMessage());
+			log.warn("Failed to send {} sync: {}", syncType, e.getMessage());
 		}
 	}
 }
