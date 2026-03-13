@@ -7,6 +7,9 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.TimeUnit;
 import javax.inject.Inject;
 import javax.inject.Singleton;
 import lombok.extern.slf4j.Slf4j;
@@ -25,6 +28,7 @@ import net.runelite.client.game.ItemManager;
 public class BankMemoryMonitor {
 	private static final int EMPTY_SLOT_ID = -1;
 	private static final int NO_PLACEHOLDER = -1;
+	private static final long DEBOUNCE_SECONDS = 30;
 
 	private final Client client;
 	private final MystixConfig config;
@@ -32,8 +36,12 @@ public class BankMemoryMonitor {
 	private final EventBus eventBus;
 	private final ItemManager itemManager;
 	private final Gson gson;
+	private final ScheduledExecutorService executor;
 
 	private String lastSyncJson = null;
+	private String pendingJson = null;
+	private BankSyncPayload pendingPayload = null;
+	private ScheduledFuture<?> pendingSync = null;
 
 	@Inject
 	public BankMemoryMonitor(
@@ -42,13 +50,15 @@ public class BankMemoryMonitor {
 			MystixApiClient apiClient,
 			EventBus eventBus,
 			ItemManager itemManager,
-			Gson gson) {
+			Gson gson,
+			ScheduledExecutorService executor) {
 		this.client = client;
 		this.config = config;
 		this.apiClient = apiClient;
 		this.eventBus = eventBus;
 		this.itemManager = itemManager;
 		this.gson = gson;
+		this.executor = executor;
 	}
 
 	public void start() {
@@ -58,7 +68,13 @@ public class BankMemoryMonitor {
 
 	public void stop() {
 		eventBus.unregister(this);
+		if (pendingSync != null) {
+			pendingSync.cancel(false);
+		}
+		flushPending();
 		lastSyncJson = null;
+		pendingJson = null;
+		pendingPayload = null;
 		log.debug("BankMemoryMonitor stopped");
 	}
 
@@ -110,9 +126,32 @@ public class BankMemoryMonitor {
 			return;
 		}
 
-		lastSyncJson = json;
-		log.info("Syncing {} bank items for player: {}", bankItems.size(), playerUsername);
-		apiClient.sendBankSync(payload);
+		pendingJson = json;
+		pendingPayload = payload;
+
+		if (pendingSync != null) {
+			pendingSync.cancel(false);
+		}
+
+		if (lastSyncJson == null) {
+			// First sync since start — send immediately
+			flushPending();
+		} else {
+			log.debug("Bank change detected, debouncing sync for {}s", DEBOUNCE_SECONDS);
+			pendingSync = executor.schedule(this::flushPending, DEBOUNCE_SECONDS, TimeUnit.SECONDS);
+		}
+	}
+
+	private synchronized void flushPending() {
+		if (pendingPayload == null) {
+			return;
+		}
+		lastSyncJson = pendingJson;
+		log.info("Syncing {} bank items for player: {}", pendingPayload.getItems().size(), pendingPayload.getPlayerUsername());
+		apiClient.sendBankSync(pendingPayload);
+		pendingPayload = null;
+		pendingJson = null;
+		pendingSync = null;
 	}
 
 	/**
