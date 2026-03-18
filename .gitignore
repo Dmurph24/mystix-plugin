@@ -1,6 +1,12 @@
 .gradle
 build
 bin/
+
+.claude/
+.cursor/
+CLAUDE.md
+AGENTS.md
+
 .idea/
 .project
 .settings/
