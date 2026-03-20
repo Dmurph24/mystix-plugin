@@ -70,7 +70,7 @@ public class MystixApiClient
 	{
 		postAsync(BANK_ENDPOINT, payload.toJson(gson), "bank",
 			response -> log.info("Mystix bank sync successful: {} items for player: {}",
-				payload.getItems().size(), payload.getPlayerUsername()));
+				payload.getTotalItemCount(), payload.getPlayerUsername()));
 	}
 
 	/**
