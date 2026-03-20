@@ -16,7 +16,7 @@ public interface MystixConfig extends Config {
 		return true;
 	}
 
-	@ConfigItem(keyName = "syncBankMemory", name = "Bank Memory", description = "Sync your bank, seed vault, and looting bag contents to Mystix.", position = 2)
+	@ConfigItem(keyName = "syncBankMemory", name = "Bank Memory", description = "Sync your bank, seed vault, looting bag, and potion storage contents to Mystix.", position = 2)
 	default boolean syncBankMemory() {
 		return true;
 	}
