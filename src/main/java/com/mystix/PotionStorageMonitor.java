@@ -20,6 +20,7 @@ import net.runelite.api.ScriptID;
 import net.runelite.api.events.ClientTick;
 import net.runelite.api.events.VarbitChanged;
 import net.runelite.api.events.WidgetClosed;
+import net.runelite.api.events.WidgetLoaded;
 import net.runelite.api.gameval.InterfaceID;
 import net.runelite.api.gameval.ItemID;
 import net.runelite.api.gameval.VarPlayerID;
@@ -73,6 +74,13 @@ public class PotionStorageMonitor {
 		needsRebuild = false;
 		lastSyncJson = null;
 		log.debug("PotionStorageMonitor stopped");
+	}
+
+	@Subscribe
+	public void onWidgetLoaded(WidgetLoaded event) {
+		if (event.getGroupId() == InterfaceID.BANKMAIN) {
+			needsRebuild = true;
+		}
 	}
 
 	@Subscribe
