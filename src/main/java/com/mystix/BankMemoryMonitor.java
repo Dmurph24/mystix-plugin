@@ -3,7 +3,6 @@ package com.mystix;
 import com.google.gson.Gson;
 import com.mystix.api.MystixApiClient;
 import com.mystix.model.BankSyncPayload;
-import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -14,8 +13,6 @@ import javax.inject.Inject;
 import javax.inject.Singleton;
 import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.Client;
-import net.runelite.api.Item;
-import net.runelite.api.ItemComposition;
 import net.runelite.api.ItemContainer;
 import net.runelite.api.events.ItemContainerChanged;
 import net.runelite.api.gameval.InventoryID;
@@ -26,8 +23,9 @@ import net.runelite.client.game.ItemManager;
 @Slf4j
 @Singleton
 public class BankMemoryMonitor {
-	private static final int EMPTY_SLOT_ID = -1;
-	private static final int NO_PLACEHOLDER = -1;
+	static final String SOURCE_BANK = "bank";
+	static final String SOURCE_INVENTORY = "inventory";
+
 	private static final long DEBOUNCE_SECONDS = 30;
 
 	private final Client client;
@@ -110,15 +108,18 @@ public class BankMemoryMonitor {
 			return;
 		}
 
-		Map<Integer, Integer> itemQuantities = new LinkedHashMap<>();
-		collectBankItems(bankContainer, itemQuantities);
-		collectContainerItems(InventoryID.INV, itemQuantities);
-		collectContainerItems(InventoryID.WORN, itemQuantities);
+		Map<Integer, Integer> bankQuantities = new LinkedHashMap<>();
+		ItemCollector.collectBankItems(bankContainer, itemManager, bankQuantities);
 
-		List<BankSyncPayload.BankItem> bankItems = new ArrayList<>();
-		itemQuantities.forEach((id, qty) -> bankItems.add(new BankSyncPayload.BankItem(id, qty)));
+		Map<Integer, Integer> invQuantities = new LinkedHashMap<>();
+		collectContainerItems(InventoryID.INV, invQuantities);
+		collectContainerItems(InventoryID.WORN, invQuantities);
 
-		BankSyncPayload payload = new BankSyncPayload(playerUsername, bankItems);
+		Map<String, List<BankSyncPayload.BankItem>> itemsBySource = new LinkedHashMap<>();
+		itemsBySource.put(SOURCE_BANK, ItemCollector.toBankItemList(bankQuantities));
+		itemsBySource.put(SOURCE_INVENTORY, ItemCollector.toBankItemList(invQuantities));
+
+		BankSyncPayload payload = new BankSyncPayload(playerUsername, itemsBySource);
 		String json = payload.toJson(gson);
 
 		if (json.equals(lastSyncJson)) {
@@ -134,7 +135,6 @@ public class BankMemoryMonitor {
 		}
 
 		if (lastSyncJson == null) {
-			// First sync since start — send immediately
 			flushPending();
 		} else {
 			log.debug("Bank change detected, debouncing sync for {}s", DEBOUNCE_SECONDS);
@@ -147,55 +147,18 @@ public class BankMemoryMonitor {
 			return;
 		}
 		lastSyncJson = pendingJson;
-		log.info("Syncing {} bank items for player: {}", pendingPayload.getItems().size(), pendingPayload.getPlayerUsername());
+		log.info("Syncing {} bank items for player: {}", pendingPayload.getTotalItemCount(), pendingPayload.getPlayerUsername());
 		apiClient.sendBankSync(pendingPayload);
 		pendingPayload = null;
 		pendingJson = null;
 		pendingSync = null;
 	}
 
-	/**
-	 * Collects items from the bank container, skipping empty slots and placeholders,
-	 * canonicalizing item IDs, and merging quantities into the aggregated map.
-	 */
-	private void collectBankItems(ItemContainer bankContainer, Map<Integer, Integer> itemQuantities) {
-		for (Item item : bankContainer.getItems()) {
-			int itemId = item.getId();
-			int quantity = item.getQuantity();
-
-			if (itemId == EMPTY_SLOT_ID || quantity <= 0) {
-				continue;
-			}
-
-			ItemComposition comp = itemManager.getItemComposition(itemId);
-			if (comp.getPlaceholderTemplateId() != NO_PLACEHOLDER) {
-				continue;
-			}
-
-			int canonicalId = itemManager.canonicalize(itemId);
-			itemQuantities.merge(canonicalId, quantity, Integer::sum);
-		}
-	}
-
-	/**
-	 * Collects items from the given container (inventory or equipment), canonicalizing
-	 * item IDs and merging quantities into the aggregated map.
-	 */
 	private void collectContainerItems(int containerId, Map<Integer, Integer> itemQuantities) {
 		ItemContainer container = client.getItemContainer(containerId);
 		if (container == null) {
 			return;
 		}
-		for (Item item : container.getItems()) {
-			int itemId = item.getId();
-			int quantity = item.getQuantity();
-
-			if (itemId == EMPTY_SLOT_ID || quantity <= 0) {
-				continue;
-			}
-
-			int canonicalId = itemManager.canonicalize(itemId);
-			itemQuantities.merge(canonicalId, quantity, Integer::sum);
-		}
+		ItemCollector.collectItems(container, itemManager, itemQuantities);
 	}
 }

@@ -64,8 +64,9 @@ public class MystixApiClientTest {
 	@Test
 	public void testSendBankSyncWithEmptyAppKeyDoesNotThrow() {
 		MystixApiClient client = new MystixApiClient(emptyKeyConfig(), new Gson());
-		BankSyncPayload payload = new BankSyncPayload("TestPlayer",
-				Arrays.asList(new BankSyncPayload.BankItem(4151, 1)));
+		Map<String, java.util.List<BankSyncPayload.BankItem>> items = new HashMap<>();
+		items.put("bank", Arrays.asList(new BankSyncPayload.BankItem(4151, 1)));
+		BankSyncPayload payload = new BankSyncPayload("TestPlayer", items);
 		client.sendBankSync(payload);
 		// Should not throw; with empty key it returns early
 	}
