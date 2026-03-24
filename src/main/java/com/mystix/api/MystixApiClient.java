@@ -5,6 +5,8 @@ import com.mystix.MystixConfig;
 import com.mystix.SyncGuard;
 import com.mystix.model.BankSyncPayload;
 import com.mystix.model.LoadoutSyncPayload;
+import com.mystix.model.LootDropPayload;
+import com.mystix.model.LootSyncPayload;
 import com.mystix.model.PlayerSkillsSyncPayload;
 import com.mystix.model.TimerSyncItem;
 import com.mystix.model.TimersSyncPayload;
@@ -24,11 +26,14 @@ import lombok.extern.slf4j.Slf4j;
 public class MystixApiClient
 {
 	private static final Duration REQUEST_TIMEOUT = Duration.ofSeconds(10);
+	private static final Duration LARGE_REQUEST_TIMEOUT = Duration.ofSeconds(60);
 	private static final String API_BASE_URL = "https://api.mystix.app";
 	private static final String TIMERS_ENDPOINT = "/api/runelite/timers/";
 	private static final String SKILLS_ENDPOINT = "/api/runelite/skills/";
 	private static final String BANK_ENDPOINT = "/api/runelite/bank/";
 	private static final String LOADOUT_ENDPOINT = "/api/runelite/loadouts/";
+	private static final String LOOT_ENDPOINT = "/api/runelite/loot/";
+	private static final String LOOT_DROP_ENDPOINT = "/api/runelite/loot/drop/";
 
 	private static final int HTTP_OK_MIN = 200;
 	private static final int HTTP_OK_MAX = 300;
@@ -73,11 +78,31 @@ public class MystixApiClient
 				payload.getTotalItemCount(), payload.getPlayerUsername()));
 	}
 
+	public void sendLootSync(LootSyncPayload payload)
+	{
+		postAsync(LOOT_ENDPOINT, payload.toJson(gson), "loot", LARGE_REQUEST_TIMEOUT,
+			response -> log.info("Mystix loot sync successful: {} records for player: {}",
+				payload.getLootRecords().size(), payload.getPlayerUsername()));
+	}
+
+	public void sendLootDrop(LootDropPayload payload)
+	{
+		postAsync(LOOT_DROP_ENDPOINT, payload.toJson(gson), "loot-drop",
+			response -> log.info("Mystix loot drop recorded: {} from {} for player: {}",
+				payload.getItems().size(), payload.getNpcName(), payload.getPlayerUsername()));
+	}
+
+	private void postAsync(String endpoint, String json, String syncType,
+		Consumer<HttpResponse<String>> onSuccess)
+	{
+		postAsync(endpoint, json, syncType, REQUEST_TIMEOUT, onSuccess);
+	}
+
 	/**
 	 * Posts a JSON payload to the given API endpoint asynchronously. Validates the app key,
 	 * builds the request with auth headers, and delegates success/error handling to callbacks.
 	 */
-	private void postAsync(String endpoint, String json, String syncType,
+	private void postAsync(String endpoint, String json, String syncType, Duration timeout,
 		Consumer<HttpResponse<String>> onSuccess)
 	{
 		String appKey = config.mystixAppKey();
@@ -95,7 +120,7 @@ public class MystixApiClient
 				.uri(URI.create(url))
 				.header("Content-Type", "application/json")
 				.header("X-RuneLite-Key", appKey.trim())
-				.timeout(REQUEST_TIMEOUT)
+				.timeout(timeout)
 				.POST(HttpRequest.BodyPublishers.ofString(json))
 				.build();
 
