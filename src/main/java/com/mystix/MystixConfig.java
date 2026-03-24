@@ -30,4 +30,9 @@ public interface MystixConfig extends Config {
 	default boolean syncLoadouts() {
 		return true;
 	}
+
+	@ConfigItem(keyName = "syncLoot", name = "Loot Tracking", description = "Sync loot drops and kill counts to Mystix.", position = 5)
+	default boolean syncLoot() {
+		return true;
+	}
 }
