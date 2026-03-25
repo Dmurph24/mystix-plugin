@@ -148,6 +148,52 @@ public class CollectionLogMonitor
 	}
 
 	/**
+	 * Detects when the collection log interface is opened so we can scan widget structure.
+	 */
+	@Subscribe
+	public void onWidgetLoaded(WidgetLoaded event)
+	{
+		if (event.getGroupId() != COLLECTION_LOG_GROUP_ID)
+		{
+			return;
+		}
+		if (!config.syncCollectionLog())
+		{
+			return;
+		}
+
+		// Scan all children of group 621 to find the title, items, etc.
+		// This runs once when the interface opens to identify the correct child indices.
+		clientThread.invokeLater(() ->
+		{
+			log.info("Collection log widget loaded — scanning children of group {}", COLLECTION_LOG_GROUP_ID);
+			for (int i = 0; i < 50; i++)
+			{
+				Widget child = client.getWidget(COLLECTION_LOG_GROUP_ID, i);
+				if (child == null)
+				{
+					continue;
+				}
+				String text = child.getText();
+				Widget[] dynamicChildren = child.getDynamicChildren();
+				int dynamicCount = dynamicChildren != null ? dynamicChildren.length : 0;
+
+				if (text != null && !text.isEmpty())
+				{
+					log.info("  Child {}: text=\"{}\"", i, text.length() > 80 ? text.substring(0, 80) + "..." : text);
+				}
+				if (dynamicCount > 0)
+				{
+					Widget firstDyn = dynamicChildren[0];
+					log.info("  Child {}: {} dynamic children (first itemId={}, name={})",
+						i, dynamicCount, firstDyn.getItemId(),
+						firstDyn.getName() != null ? firstDyn.getName() : "null");
+				}
+			}
+		});
+	}
+
+	/**
 	 * Every game tick, check if the collection log is open and the page changed.
 	 * This replaces script-based detection which is fragile across game updates.
 	 */
