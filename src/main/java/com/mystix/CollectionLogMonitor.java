@@ -8,11 +8,9 @@ import com.mystix.model.CollectionLogSyncPayload;
 import java.lang.reflect.Type;
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import javax.inject.Inject;
@@ -20,15 +18,13 @@ import javax.inject.Singleton;
 import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.ChatMessageType;
 import net.runelite.api.Client;
-import net.runelite.api.EnumComposition;
 import net.runelite.api.GameState;
 import net.runelite.api.NPC;
-import net.runelite.api.StructComposition;
 import net.runelite.api.WorldView;
 import net.runelite.api.events.ChatMessage;
 import net.runelite.api.events.GameStateChanged;
 import net.runelite.api.events.ScriptPostFired;
-import net.runelite.api.events.ScriptPreFired;
+import net.runelite.api.events.WidgetClosed;
 import net.runelite.api.events.WidgetLoaded;
 import net.runelite.api.widgets.Widget;
 import net.runelite.client.callback.ClientThread;
@@ -37,21 +33,13 @@ import net.runelite.client.eventbus.EventBus;
 import net.runelite.client.eventbus.Subscribe;
 
 /**
- * Monitors the in-game Collection Log interface using two complementary strategies:
+ * Monitors the in-game Collection Log interface, captures page data when the player
+ * browses it, caches to ConfigManager, and syncs to the Mystix API on login/logout.
  *
- * <p><b>Strategy 1 — Game cache + search trick (bulk capture):</b>
- * On login, parses the game cache (enum 2102 → structs → item enums) to build the full
- * collection log structure (all tabs, pages, and item IDs). When the player opens the
- * collection log, automatically triggers the in-game search script (2240) which causes
- * script 4100 to fire once per <em>obtained</em> item. This captures all obtained items
- * across the entire log without the player needing to browse every page.
- *
- * <p><b>Strategy 2 — Widget scraping (enrichment):</b>
- * When the player manually browses a collection log page, captures full details from the
- * widgets: item quantities, kill counts, and NPC associations. This enriches the bulk data
- * with information the search trick cannot provide.
- *
- * <p>Data is cached to ConfigManager and synced to the Mystix API on login/logout.
+ * <p>The player must open their collection log in-game at least once for data to be captured.
+ * Each page the player navigates to is captured from the widgets (items, quantities, kill counts).
+ * Data is cached to ConfigManager and persists across sessions, so subsequent logins will sync
+ * the previously captured data automatically.
  */
 @Slf4j
 @Singleton
@@ -62,30 +50,14 @@ public class CollectionLogMonitor
 	/** Collection log interface group ID. */
 	private static final int COLLECTION_LOG_GROUP_ID = 621;
 
-	/** Script that fires when a collection log page is drawn (once per obtained item during search). */
+	/** Script ID that fires when a collection log page is drawn/navigated. */
 	private static final int COLLECTION_LOG_DRAW_LIST_SCRIPT = 4100;
-
-	/** Script that triggers the collection log search (iterates all items). */
-	private static final int COLLECTION_LOG_SEARCH_SCRIPT = 2240;
 
 	/** Widget child indices within the collection log interface (group 621). */
 	private static final int CHILD_TITLE = 1;
 	private static final int CHILD_TAB_HEADER = 3;
 	private static final int CHILD_ITEMS_CONTAINER = 36;
 	private static final int CHILD_KC_TEXT = 37;
-
-	/**
-	 * Game cache enum/param IDs for the collection log structure.
-	 * Enum 2102 = top-level tabs; param 683 = subtab enum; param 690 = item enum;
-	 * param 689 = page/group name (string).
-	 */
-	private static final int CLOG_TOP_LEVEL_ENUM = 2102;
-	private static final int PARAM_SUBTAB_ENUM = 683;
-	private static final int PARAM_ITEMS_ENUM = 690;
-	private static final int PARAM_PAGE_NAME = 689;
-
-	/** Top-level tab names in enum 2102 order. */
-	private static final String[] TAB_NAMES = {"Bosses", "Raids", "Clues", "Minigames", "Other"};
 
 	private static final String COLLECTION_LOG_CHAT_PREFIX = "New item added to your collection log: ";
 
@@ -103,15 +75,6 @@ public class CollectionLogMonitor
 
 	private GameState previousGameState = GameState.UNKNOWN;
 	private boolean collectionLogOpen = false;
-
-	/** True while a search-triggered bulk capture is in progress. */
-	private boolean bulkCaptureInProgress = false;
-
-	/** Set of obtained item IDs collected during bulk capture via ScriptPreFired. */
-	private final Set<Integer> bulkObtainedItems = new HashSet<>();
-
-	/** Full collection log structure parsed from the game cache: pageName -> CachePageDef. */
-	private final Map<String, CachePageDef> cacheStructure = new LinkedHashMap<>();
 
 	/** In-memory cache of captured collection log pages: pageName -> CachedPage. */
 	private final Map<String, CachedPage> cachedPages = new LinkedHashMap<>();
@@ -148,9 +111,6 @@ public class CollectionLogMonitor
 		eventBus.unregister(this);
 		previousGameState = GameState.UNKNOWN;
 		collectionLogOpen = false;
-		bulkCaptureInProgress = false;
-		bulkObtainedItems.clear();
-		cacheStructure.clear();
 		cachedPages.clear();
 		log.debug("CollectionLogMonitor stopped");
 	}
@@ -174,7 +134,6 @@ public class CollectionLogMonitor
 				{
 					return false;
 				}
-				parseCacheStructure();
 				loadCacheFromConfig();
 				log.debug("RS profile ready, scheduling collection log sync in {}s", PROFILE_SYNC_DELAY_SECONDS);
 				executorService.schedule(this::syncCollectionLog, PROFILE_SYNC_DELAY_SECONDS, TimeUnit.SECONDS);
@@ -186,7 +145,6 @@ public class CollectionLogMonitor
 			log.debug("Player logged out, syncing collection log");
 			syncCollectionLog();
 			collectionLogOpen = false;
-			bulkCaptureInProgress = false;
 		}
 
 		previousGameState = newState;
@@ -194,79 +152,33 @@ public class CollectionLogMonitor
 
 	/**
 	 * Detects when the collection log interface is opened.
-	 * Automatically triggers the search trick to bulk-capture all obtained items.
 	 */
 	@Subscribe
 	public void onWidgetLoaded(WidgetLoaded event)
 	{
-		if (event.getGroupId() != COLLECTION_LOG_GROUP_ID)
+		if (event.getGroupId() == COLLECTION_LOG_GROUP_ID)
 		{
-			return;
+			collectionLogOpen = true;
+			log.debug("Collection log interface opened");
 		}
-
-		collectionLogOpen = true;
-		log.debug("Collection log interface opened");
-
-		if (!config.syncCollectionLog())
-		{
-			return;
-		}
-		if (cacheStructure.isEmpty())
-		{
-			log.debug("No cache structure available, skipping bulk capture");
-			return;
-		}
-
-		// Trigger bulk capture: run the search script which fires script 4100
-		// once per obtained item across the entire collection log.
-		clientThread.invokeLater(() ->
-		{
-			bulkObtainedItems.clear();
-			bulkCaptureInProgress = true;
-			log.debug("Starting bulk collection log capture via search trick");
-			client.runScript(COLLECTION_LOG_SEARCH_SCRIPT);
-		});
 	}
 
 	/**
-	 * Captures obtained item IDs during bulk search capture.
-	 * Script 4100 fires once per obtained item when triggered by the search script.
-	 * The item ID is in args[1].
+	 * Detects when the collection log interface is closed.
 	 */
 	@Subscribe
-	public void onScriptPreFired(ScriptPreFired event)
+	public void onWidgetClosed(WidgetClosed event)
 	{
-		if (event.getScriptId() != COLLECTION_LOG_DRAW_LIST_SCRIPT)
+		if (event.getGroupId() == COLLECTION_LOG_GROUP_ID)
 		{
-			return;
-		}
-		if (!bulkCaptureInProgress)
-		{
-			return;
-		}
-
-		try
-		{
-			Object[] args = event.getScriptEvent().getArguments();
-			if (args != null && args.length > 1)
-			{
-				int itemId = (int) args[1];
-				if (itemId > 0)
-				{
-					bulkObtainedItems.add(itemId);
-				}
-			}
-		}
-		catch (Exception e)
-		{
-			log.debug("Failed to read item ID from script 4100 args", e);
+			collectionLogOpen = false;
+			log.debug("Collection log interface closed");
 		}
 	}
 
 	/**
 	 * Captures collection log page data when the draw-list script fires.
-	 * During normal browsing (not bulk capture), reads full widget data for the current page.
-	 * After bulk capture completes, merges the obtained items into the cache structure.
+	 * This fires each time the player navigates to a different page in the collection log.
 	 */
 	@Subscribe
 	public void onScriptPostFired(ScriptPostFired event)
@@ -284,69 +196,7 @@ public class CollectionLogMonitor
 			return;
 		}
 
-		if (bulkCaptureInProgress)
-		{
-			// The search has completed (ScriptPostFired means all PreFired callbacks ran).
-			// Merge the obtained items into the cache structure.
-			finishBulkCapture();
-			return;
-		}
-
-		// Normal page browsing — capture full widget details (quantities, KC, etc.)
 		captureCurrentPage();
-	}
-
-	/**
-	 * Finishes the bulk capture by merging obtained item IDs with the cache structure.
-	 * Creates CachedPage entries for every page in the structure with obtained/not-obtained status.
-	 */
-	private void finishBulkCapture()
-	{
-		bulkCaptureInProgress = false;
-		int totalObtainedCount = bulkObtainedItems.size();
-		log.info("Bulk capture complete: {} obtained items detected", totalObtainedCount);
-
-		if (bulkObtainedItems.isEmpty() && cacheStructure.isEmpty())
-		{
-			return;
-		}
-
-		for (CachePageDef pageDef : cacheStructure.values())
-		{
-			// If we already have widget-captured data for this page (with quantities/KC),
-			// don't overwrite it with the less-detailed bulk data.
-			CachedPage existing = cachedPages.get(pageDef.name);
-			if (existing != null && existing.killCount != null)
-			{
-				continue;
-			}
-
-			List<CachedItem> items = new ArrayList<>();
-			int obtained = 0;
-
-			for (int itemId : pageDef.itemIds)
-			{
-				boolean isObtained = bulkObtainedItems.contains(itemId);
-				items.add(new CachedItem(itemId, isObtained ? 1 : 0, isObtained));
-				if (isObtained)
-				{
-					obtained++;
-				}
-			}
-
-			CachedPage page = new CachedPage(
-				pageDef.name, pageDef.tab, null, null, null,
-				obtained, pageDef.itemIds.size(), items
-			);
-			cachedPages.put(pageDef.name, page);
-		}
-
-		bulkObtainedItems.clear();
-		log.info("Collection log cache updated: {} pages from bulk capture + cache structure", cachedPages.size());
-		saveCacheToConfig();
-
-		// Trigger an immediate sync since we now have full data
-		executorService.submit(this::syncCollectionLog);
 	}
 
 	/**
@@ -403,93 +253,6 @@ public class CollectionLogMonitor
 		);
 		executorService.submit(() -> apiClient.sendCollectionLogEntry(payload));
 		log.info("Collection log entry detected: {} for player {}", itemName, playerUsername);
-	}
-
-	/**
-	 * Parses the game cache to build the full collection log structure.
-	 * Uses enum 2102 (top-level tabs) → param 683 (subtab enums) → param 690 (item enums).
-	 * Must be called on the client thread.
-	 */
-	private void parseCacheStructure()
-	{
-		try
-		{
-			cacheStructure.clear();
-			EnumComposition topLevel = client.getEnum(CLOG_TOP_LEVEL_ENUM);
-			if (topLevel == null)
-			{
-				log.warn("Could not load collection log top-level enum (2102)");
-				return;
-			}
-
-			int[] tabStructIds = topLevel.getIntVals();
-			for (int tabIdx = 0; tabIdx < tabStructIds.length; tabIdx++)
-			{
-				String tabName = tabIdx < TAB_NAMES.length ? TAB_NAMES[tabIdx] : "Other";
-				StructComposition tabStruct = client.getStructComposition(tabStructIds[tabIdx]);
-				if (tabStruct == null)
-				{
-					continue;
-				}
-
-				int subtabEnumId = tabStruct.getIntValue(PARAM_SUBTAB_ENUM);
-				if (subtabEnumId <= 0)
-				{
-					continue;
-				}
-
-				EnumComposition subtabEnum = client.getEnum(subtabEnumId);
-				if (subtabEnum == null)
-				{
-					continue;
-				}
-
-				int[] pageStructIds = subtabEnum.getIntVals();
-				for (int pageStructId : pageStructIds)
-				{
-					StructComposition pageStruct = client.getStructComposition(pageStructId);
-					if (pageStruct == null)
-					{
-						continue;
-					}
-
-					String pageName = pageStruct.getStringValue(PARAM_PAGE_NAME);
-					if (pageName == null || pageName.isEmpty())
-					{
-						continue;
-					}
-
-					int itemsEnumId = pageStruct.getIntValue(PARAM_ITEMS_ENUM);
-					if (itemsEnumId <= 0)
-					{
-						continue;
-					}
-
-					EnumComposition itemsEnum = client.getEnum(itemsEnumId);
-					if (itemsEnum == null)
-					{
-						continue;
-					}
-
-					List<Integer> itemIds = new ArrayList<>();
-					for (int itemId : itemsEnum.getIntVals())
-					{
-						if (itemId > 0)
-						{
-							itemIds.add(itemId);
-						}
-					}
-
-					cacheStructure.put(pageName, new CachePageDef(pageName, tabName, itemIds));
-				}
-			}
-
-			log.info("Parsed collection log structure from game cache: {} pages", cacheStructure.size());
-		}
-		catch (Exception e)
-		{
-			log.warn("Failed to parse collection log structure from game cache", e);
-		}
 	}
 
 	/**
@@ -566,9 +329,8 @@ public class CollectionLogMonitor
 	}
 
 	/**
-	 * Reads the currently displayed collection log page from widgets.
-	 * This captures full details (quantities, KC) that the bulk search trick cannot provide.
-	 * Widget-captured data takes priority over bulk-captured data.
+	 * Reads the currently displayed collection log page from widgets and caches it.
+	 * Captures full details: items with quantities, obtained status, kill counts, and NPC info.
 	 */
 	private void captureCurrentPage()
 	{
@@ -629,14 +391,14 @@ public class CollectionLogMonitor
 			);
 			cachedPages.put(pageName, page);
 
-			log.debug("Captured collection log page: {} ({}/{} items, tab={})",
+			log.info("Captured collection log page: {} ({}/{} items, tab={})",
 				pageName, totalObtained, totalItems, tabName);
 
 			saveCacheToConfig();
 		}
 		catch (Exception e)
 		{
-			log.debug("Failed to capture collection log page", e);
+			log.warn("Failed to capture collection log page", e);
 		}
 	}
 
@@ -736,7 +498,7 @@ public class CollectionLogMonitor
 
 		if (cachedPages.isEmpty())
 		{
-			log.debug("No collection log data to sync — open your collection log in-game to capture data");
+			log.info("No collection log data to sync — open your collection log in-game and browse pages to capture data");
 			return;
 		}
 
@@ -769,6 +531,7 @@ public class CollectionLogMonitor
 		{
 			String json = gson.toJson(cachedPages);
 			configManager.setRSProfileConfiguration(CONFIG_GROUP, CLOG_CACHE_KEY, json);
+			log.debug("Saved {} collection log pages to config cache", cachedPages.size());
 		}
 		catch (Exception e)
 		{
@@ -793,7 +556,7 @@ public class CollectionLogMonitor
 			String json = configManager.getConfiguration(CONFIG_GROUP, profileKey, CLOG_CACHE_KEY);
 			if (json == null || json.isEmpty())
 			{
-				log.info("No cached collection log data found — open your collection log in-game to capture data");
+				log.info("No cached collection log data found — open your collection log in-game to capture pages");
 				return;
 			}
 
@@ -814,24 +577,6 @@ public class CollectionLogMonitor
 		catch (Exception e)
 		{
 			log.warn("Failed to load collection log cache from config", e);
-		}
-	}
-
-	/**
-	 * Definition of a collection log page from the game cache.
-	 * Contains the page name, tab, and all item IDs on that page.
-	 */
-	private static class CachePageDef
-	{
-		final String name;
-		final String tab;
-		final List<Integer> itemIds;
-
-		CachePageDef(String name, String tab, List<Integer> itemIds)
-		{
-			this.name = name;
-			this.tab = tab;
-			this.itemIds = itemIds;
 		}
 	}
 
