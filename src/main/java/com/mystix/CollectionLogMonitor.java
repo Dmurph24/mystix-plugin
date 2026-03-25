@@ -162,9 +162,8 @@ public class CollectionLogMonitor
 			return;
 		}
 
-		// Scan all children of group 621 to find the title, items, etc.
-		// This runs once when the interface opens to identify the correct child indices.
-		clientThread.invokeLater(() ->
+		// Scan all children of group 621 after a short delay to let widgets populate.
+		executorService.schedule(() -> clientThread.invokeLater(() ->
 		{
 			log.info("Collection log widget loaded — scanning children of group {}", COLLECTION_LOG_GROUP_ID);
 			for (int i = 0; i < 50; i++)
@@ -190,7 +189,7 @@ public class CollectionLogMonitor
 						firstDyn.getName() != null ? firstDyn.getName() : "null");
 				}
 			}
-		});
+		}), 2, TimeUnit.SECONDS);
 	}
 
 	/**
