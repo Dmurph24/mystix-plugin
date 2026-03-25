@@ -24,7 +24,6 @@ import net.runelite.api.WorldView;
 import net.runelite.api.events.ChatMessage;
 import net.runelite.api.events.GameStateChanged;
 import net.runelite.api.events.ScriptPostFired;
-import net.runelite.api.events.WidgetClosed;
 import net.runelite.api.events.WidgetLoaded;
 import net.runelite.api.widgets.Widget;
 import net.runelite.client.callback.ClientThread;
@@ -159,40 +158,45 @@ public class CollectionLogMonitor
 		if (event.getGroupId() == COLLECTION_LOG_GROUP_ID)
 		{
 			collectionLogOpen = true;
-			log.debug("Collection log interface opened");
-		}
-	}
-
-	/**
-	 * Detects when the collection log interface is closed.
-	 */
-	@Subscribe
-	public void onWidgetClosed(WidgetClosed event)
-	{
-		if (event.getGroupId() == COLLECTION_LOG_GROUP_ID)
-		{
-			collectionLogOpen = false;
-			log.debug("Collection log interface closed");
+			log.info("Collection log interface opened");
 		}
 	}
 
 	/**
 	 * Captures collection log page data when the draw-list script fires.
-	 * This fires each time the player navigates to a different page in the collection log.
+	 * Instead of relying on the collectionLogOpen flag, we check the widget directly
+	 * since script 4100 only fires when the collection log is active.
 	 */
 	@Subscribe
 	public void onScriptPostFired(ScriptPostFired event)
 	{
+		if (!config.syncCollectionLog())
+		{
+			return;
+		}
+
+		// Debug: log all scripts that fire while the collection log widget exists
+		// to help identify the correct script ID if 4100 has changed.
+		if (collectionLogOpen)
+		{
+			Widget titleWidget = client.getWidget(COLLECTION_LOG_GROUP_ID, CHILD_TITLE);
+			if (titleWidget != null && titleWidget.getText() != null)
+			{
+				log.info("Script {} fired while collection log open (title: {})",
+					event.getScriptId(), titleWidget.getText());
+			}
+		}
+
 		if (event.getScriptId() != COLLECTION_LOG_DRAW_LIST_SCRIPT)
 		{
 			return;
 		}
-		if (!collectionLogOpen)
+
+		// Check widget directly instead of relying on collectionLogOpen state
+		Widget titleWidget = client.getWidget(COLLECTION_LOG_GROUP_ID, CHILD_TITLE);
+		if (titleWidget == null)
 		{
-			return;
-		}
-		if (!config.syncCollectionLog())
-		{
+			log.debug("Script 4100 fired but collection log title widget not found");
 			return;
 		}
 
