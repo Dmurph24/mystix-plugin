@@ -4,6 +4,8 @@ import com.google.gson.Gson;
 import com.mystix.MystixConfig;
 import com.mystix.SyncGuard;
 import com.mystix.model.BankSyncPayload;
+import com.mystix.model.CollectionLogEntryPayload;
+import com.mystix.model.CollectionLogSyncPayload;
 import com.mystix.model.LoadoutSyncPayload;
 import com.mystix.model.LootDropPayload;
 import com.mystix.model.LootSyncPayload;
@@ -34,6 +36,8 @@ public class MystixApiClient
 	private static final String LOADOUT_ENDPOINT = "/api/runelite/loadouts/";
 	private static final String LOOT_ENDPOINT = "/api/runelite/loot/";
 	private static final String LOOT_DROP_ENDPOINT = "/api/runelite/loot/drop/";
+	private static final String COLLECTION_LOG_ENDPOINT = "/api/runelite/collection-log/";
+	private static final String COLLECTION_LOG_ENTRY_ENDPOINT = "/api/runelite/collection-log/entry/";
 
 	private static final int HTTP_OK_MIN = 200;
 	private static final int HTTP_OK_MAX = 300;
@@ -90,6 +94,20 @@ public class MystixApiClient
 		postAsync(LOOT_DROP_ENDPOINT, payload.toJson(gson), "loot-drop",
 			response -> log.info("Mystix loot drop recorded: {} from {} for player: {}",
 				payload.getItems().size(), payload.getNpcName(), payload.getPlayerUsername()));
+	}
+
+	public void sendCollectionLogEntry(CollectionLogEntryPayload payload)
+	{
+		postAsync(COLLECTION_LOG_ENTRY_ENDPOINT, payload.toJson(gson), "collection-log-entry",
+			response -> log.info("Mystix collection log entry recorded: item {} in {} for player: {}",
+				payload.getItemId(), payload.getGroupName(), payload.getPlayerUsername()));
+	}
+
+	public void sendCollectionLogSync(CollectionLogSyncPayload payload)
+	{
+		postAsync(COLLECTION_LOG_ENDPOINT, payload.toJson(gson), "collection-log", LARGE_REQUEST_TIMEOUT,
+			response -> log.info("Mystix collection log sync successful: {} groups for player: {}",
+				payload.getGroups().size(), payload.getPlayerUsername()));
 	}
 
 	private void postAsync(String endpoint, String json, String syncType,

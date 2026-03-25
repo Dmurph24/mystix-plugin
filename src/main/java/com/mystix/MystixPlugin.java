@@ -28,7 +28,7 @@ import com.mystix.runelite.hunter.BirdHouseTracker;
 import com.mystix.wom.WomSyncService;
 
 @Slf4j
-@PluginDescriptor(name = "Mystix", description = "Syncs Farming Timers, Bank, Skills, Loadout, and Loot data to the Mystix mobile app.")
+@PluginDescriptor(name = "Mystix", description = "Syncs Farming Timers, Bank, Skills, Loadout, Loot, and Collection Log data to the Mystix mobile app.")
 @PluginDependency(TimeTrackingPlugin.class)
 public class MystixPlugin extends Plugin {
 	private static final String TEARS_CAVE_MESSAGE = "Your stories have entertained me. I will let you into the cave for a short time.";
@@ -59,6 +59,9 @@ public class MystixPlugin extends Plugin {
 
 	@Inject
 	private LootMonitor lootMonitor;
+
+	@Inject
+	private CollectionLogMonitor collectionLogMonitor;
 
 	@Inject
 	private WomSyncService womSyncService;
@@ -110,6 +113,7 @@ public class MystixPlugin extends Plugin {
 		potionStorageMonitor.start();
 		loadoutMonitor.start();
 		lootMonitor.start();
+		collectionLogMonitor.start();
 
 		eventBus.register(this);
 
@@ -127,6 +131,7 @@ public class MystixPlugin extends Plugin {
 		potionStorageMonitor.stop();
 		loadoutMonitor.stop();
 		lootMonitor.stop();
+		collectionLogMonitor.stop();
 		lastUsername = null;
 		log.debug("Mystix stopped");
 	}

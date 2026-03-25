@@ -35,4 +35,9 @@ public interface MystixConfig extends Config {
 	default boolean syncLoot() {
 		return true;
 	}
+
+	@ConfigItem(keyName = "syncCollectionLog", name = "Collection Log", description = "Sync your collection log progress to Mystix.", position = 6)
+	default boolean syncCollectionLog() {
+		return true;
+	}
 }
