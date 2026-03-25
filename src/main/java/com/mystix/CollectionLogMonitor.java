@@ -23,7 +23,7 @@ import net.runelite.api.NPC;
 import net.runelite.api.WorldView;
 import net.runelite.api.events.ChatMessage;
 import net.runelite.api.events.GameStateChanged;
-import net.runelite.api.events.ScriptPostFired;
+import net.runelite.api.events.GameTick;
 import net.runelite.api.events.WidgetLoaded;
 import net.runelite.api.widgets.Widget;
 import net.runelite.client.callback.ClientThread;
@@ -35,10 +35,9 @@ import net.runelite.client.eventbus.Subscribe;
  * Monitors the in-game Collection Log interface, captures page data when the player
  * browses it, caches to ConfigManager, and syncs to the Mystix API on login/logout.
  *
- * <p>The player must open their collection log in-game at least once for data to be captured.
- * Each page the player navigates to is captured from the widgets (items, quantities, kill counts).
- * Data is cached to ConfigManager and persists across sessions, so subsequent logins will sync
- * the previously captured data automatically.
+ * <p>Uses a GameTick poll to detect when the player navigates to a new page
+ * (by checking if the title widget text changed). This is more robust than relying
+ * on specific script IDs which can change between game updates.
  */
 @Slf4j
 @Singleton
@@ -48,9 +47,6 @@ public class CollectionLogMonitor
 
 	/** Collection log interface group ID. */
 	private static final int COLLECTION_LOG_GROUP_ID = 621;
-
-	/** Script ID that fires when a collection log page is drawn/navigated. */
-	private static final int COLLECTION_LOG_DRAW_LIST_SCRIPT = 4100;
 
 	/** Widget child indices within the collection log interface (group 621). */
 	private static final int CHILD_TITLE = 1;
@@ -73,7 +69,9 @@ public class CollectionLogMonitor
 	private final Gson gson;
 
 	private GameState previousGameState = GameState.UNKNOWN;
-	private boolean collectionLogOpen = false;
+
+	/** The last captured page title, used to detect page changes. */
+	private String lastCapturedTitle = null;
 
 	/** In-memory cache of captured collection log pages: pageName -> CachedPage. */
 	private final Map<String, CachedPage> cachedPages = new LinkedHashMap<>();
@@ -109,7 +107,7 @@ public class CollectionLogMonitor
 	{
 		eventBus.unregister(this);
 		previousGameState = GameState.UNKNOWN;
-		collectionLogOpen = false;
+		lastCapturedTitle = null;
 		cachedPages.clear();
 		log.debug("CollectionLogMonitor stopped");
 	}
@@ -143,63 +141,46 @@ public class CollectionLogMonitor
 		{
 			log.debug("Player logged out, syncing collection log");
 			syncCollectionLog();
-			collectionLogOpen = false;
+			lastCapturedTitle = null;
 		}
 
 		previousGameState = newState;
 	}
 
 	/**
-	 * Detects when the collection log interface is opened.
+	 * Every game tick, check if the collection log is open and the page changed.
+	 * This replaces script-based detection which is fragile across game updates.
 	 */
 	@Subscribe
-	public void onWidgetLoaded(WidgetLoaded event)
-	{
-		if (event.getGroupId() == COLLECTION_LOG_GROUP_ID)
-		{
-			collectionLogOpen = true;
-			log.info("Collection log interface opened");
-		}
-	}
-
-	/**
-	 * Captures collection log page data when the draw-list script fires.
-	 * Instead of relying on the collectionLogOpen flag, we check the widget directly
-	 * since script 4100 only fires when the collection log is active.
-	 */
-	@Subscribe
-	public void onScriptPostFired(ScriptPostFired event)
+	public void onGameTick(GameTick event)
 	{
 		if (!config.syncCollectionLog())
 		{
 			return;
 		}
 
-		// Debug: log all scripts that fire while the collection log widget exists
-		// to help identify the correct script ID if 4100 has changed.
-		if (collectionLogOpen)
-		{
-			Widget titleWidget = client.getWidget(COLLECTION_LOG_GROUP_ID, CHILD_TITLE);
-			if (titleWidget != null && titleWidget.getText() != null)
-			{
-				log.info("Script {} fired while collection log open (title: {})",
-					event.getScriptId(), titleWidget.getText());
-			}
-		}
-
-		if (event.getScriptId() != COLLECTION_LOG_DRAW_LIST_SCRIPT)
-		{
-			return;
-		}
-
-		// Check widget directly instead of relying on collectionLogOpen state
+		// Check if the collection log title widget exists and has text
 		Widget titleWidget = client.getWidget(COLLECTION_LOG_GROUP_ID, CHILD_TITLE);
-		if (titleWidget == null)
+		if (titleWidget == null || titleWidget.getText() == null || titleWidget.getText().isEmpty())
 		{
-			log.debug("Script 4100 fired but collection log title widget not found");
+			// Collection log is not open — reset so we re-capture if it reopens
+			if (lastCapturedTitle != null)
+			{
+				log.debug("Collection log closed");
+				lastCapturedTitle = null;
+			}
 			return;
 		}
 
+		String currentTitle = titleWidget.getText();
+
+		// Only capture when the title changes (new page navigated to)
+		if (currentTitle.equals(lastCapturedTitle))
+		{
+			return;
+		}
+
+		lastCapturedTitle = currentTitle;
 		captureCurrentPage();
 	}
 
@@ -243,8 +224,8 @@ public class CollectionLogMonitor
 		String itemName = message.substring(COLLECTION_LOG_CHAT_PREFIX.length()).trim();
 
 		int itemId = resolveItemIdFromWidget(itemName);
-		String groupName = resolveCurrentGroupName();
-		String tab = resolveCurrentTab();
+		String groupName = readPageName();
+		String tab = readTabName();
 
 		if (itemId <= 0)
 		{
@@ -265,11 +246,6 @@ public class CollectionLogMonitor
 	 */
 	private int resolveItemIdFromWidget(String itemName)
 	{
-		if (!collectionLogOpen)
-		{
-			return -1;
-		}
-
 		Widget itemsContainer = client.getWidget(COLLECTION_LOG_GROUP_ID, CHILD_ITEMS_CONTAINER);
 		if (itemsContainer == null || itemsContainer.getDynamicChildren() == null)
 		{
@@ -286,30 +262,6 @@ public class CollectionLogMonitor
 		}
 
 		return -1;
-	}
-
-	/**
-	 * Returns the name of the currently open collection log group, or null.
-	 */
-	private String resolveCurrentGroupName()
-	{
-		if (!collectionLogOpen)
-		{
-			return null;
-		}
-		return readPageName();
-	}
-
-	/**
-	 * Returns the name of the currently open collection log tab, or null.
-	 */
-	private String resolveCurrentTab()
-	{
-		if (!collectionLogOpen)
-		{
-			return null;
-		}
-		return readTabName();
 	}
 
 	/**
@@ -334,7 +286,6 @@ public class CollectionLogMonitor
 
 	/**
 	 * Reads the currently displayed collection log page from widgets and caches it.
-	 * Captures full details: items with quantities, obtained status, kill counts, and NPC info.
 	 */
 	private void captureCurrentPage()
 	{
@@ -343,18 +294,27 @@ public class CollectionLogMonitor
 			String pageName = readPageName();
 			if (pageName == null)
 			{
+				log.warn("Could not read page name from collection log title widget");
 				return;
 			}
 
 			String tabName = readTabName();
-
 			Integer killCount = readKillCount();
+
 			Widget itemsContainer = client.getWidget(COLLECTION_LOG_GROUP_ID, CHILD_ITEMS_CONTAINER);
 			List<CachedItem> items = new ArrayList<>();
 			int totalObtained = 0;
 			int totalItems = 0;
 
-			if (itemsContainer != null && itemsContainer.getDynamicChildren() != null)
+			if (itemsContainer == null)
+			{
+				log.warn("Collection log items container widget (child {}) not found", CHILD_ITEMS_CONTAINER);
+			}
+			else if (itemsContainer.getDynamicChildren() == null)
+			{
+				log.warn("Collection log items container has no dynamic children");
+			}
+			else
 			{
 				for (Widget itemWidget : itemsContainer.getDynamicChildren())
 				{
@@ -365,8 +325,6 @@ public class CollectionLogMonitor
 					}
 
 					int quantity = itemWidget.getItemQuantity();
-					// Items that haven't been obtained have an opacity/colour tint.
-					// The item widget opacity is 0 for obtained items and >0 for unobtained.
 					boolean obtained = itemWidget.getOpacity() == 0;
 
 					items.add(new CachedItem(itemId, obtained ? quantity : 0, obtained));
@@ -395,8 +353,8 @@ public class CollectionLogMonitor
 			);
 			cachedPages.put(pageName, page);
 
-			log.info("Captured collection log page: {} ({}/{} items, tab={})",
-				pageName, totalObtained, totalItems, tabName);
+			log.info("Captured collection log page: {} ({}/{} items, tab={}, kc={})",
+				pageName, totalObtained, totalItems, tabName, killCount);
 
 			saveCacheToConfig();
 		}
@@ -421,7 +379,6 @@ public class CollectionLogMonitor
 
 	/**
 	 * Reads the kill count from the KC text widget.
-	 * The text format varies: "Kills: 500" or "Completions: 150" or "Opens: 200" etc.
 	 */
 	private Integer readKillCount()
 	{
@@ -451,10 +408,6 @@ public class CollectionLogMonitor
 		return null;
 	}
 
-	/**
-	 * Resolves an NPC name to its NPC ID by checking currently loaded NPCs.
-	 * Falls back to a deterministic hash if no matching NPC is found nearby.
-	 */
 	private int resolveNpcId(String npcName)
 	{
 		for (NPC npc : getWorldNpcs())
@@ -526,16 +479,12 @@ public class CollectionLogMonitor
 		apiClient.sendCollectionLogSync(payload);
 	}
 
-	/**
-	 * Saves the cached pages to ConfigManager as JSON so they persist across sessions.
-	 */
 	private void saveCacheToConfig()
 	{
 		try
 		{
 			String json = gson.toJson(cachedPages);
 			configManager.setRSProfileConfiguration(CONFIG_GROUP, CLOG_CACHE_KEY, json);
-			log.debug("Saved {} collection log pages to config cache", cachedPages.size());
 		}
 		catch (Exception e)
 		{
@@ -543,9 +492,6 @@ public class CollectionLogMonitor
 		}
 	}
 
-	/**
-	 * Loads cached pages from ConfigManager into the in-memory map.
-	 */
 	private void loadCacheFromConfig()
 	{
 		try
@@ -584,10 +530,6 @@ public class CollectionLogMonitor
 		}
 	}
 
-	/**
-	 * Cached representation of a collection log page.
-	 * Fields are non-final with a no-arg constructor for GSON deserialization.
-	 */
 	private static class CachedPage
 	{
 		String name;
@@ -618,10 +560,6 @@ public class CollectionLogMonitor
 		}
 	}
 
-	/**
-	 * Cached representation of a single collection log item.
-	 * Fields are non-final with a no-arg constructor for GSON deserialization.
-	 */
 	private static class CachedItem
 	{
 		int itemId;
