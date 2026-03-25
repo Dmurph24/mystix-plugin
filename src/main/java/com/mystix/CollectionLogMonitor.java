@@ -174,19 +174,53 @@ public class CollectionLogMonitor
 					continue;
 				}
 				String text = child.getText();
+				String name = child.getName();
 				Widget[] dynamicChildren = child.getDynamicChildren();
+				Widget[] staticChildren = child.getStaticChildren();
 				int dynamicCount = dynamicChildren != null ? dynamicChildren.length : 0;
+				int staticCount = staticChildren != null ? staticChildren.length : 0;
 
-				if (text != null && !text.isEmpty())
+				boolean hasText = text != null && !text.isEmpty();
+				boolean hasName = name != null && !name.isEmpty();
+				boolean hasDynamic = dynamicCount > 0;
+				boolean hasStatic = staticCount > 0;
+				int itemId = child.getItemId();
+
+				if (hasText || hasName || hasDynamic || hasStatic || itemId > 0)
 				{
-					log.info("  Child {}: text=\"{}\"", i, text.length() > 80 ? text.substring(0, 80) + "..." : text);
-				}
-				if (dynamicCount > 0)
-				{
-					Widget firstDyn = dynamicChildren[0];
-					log.info("  Child {}: {} dynamic children (first itemId={}, name={})",
-						i, dynamicCount, firstDyn.getItemId(),
-						firstDyn.getName() != null ? firstDyn.getName() : "null");
+					StringBuilder sb = new StringBuilder();
+					sb.append("  Child ").append(i).append(":");
+					if (hasText)
+					{
+						String truncated = text.length() > 100 ? text.substring(0, 100) + "..." : text;
+						sb.append(" text=\"").append(truncated).append("\"");
+					}
+					if (hasName)
+					{
+						sb.append(" name=\"").append(name).append("\"");
+					}
+					if (itemId > 0)
+					{
+						sb.append(" itemId=").append(itemId);
+					}
+					if (hasDynamic)
+					{
+						Widget firstDyn = dynamicChildren[0];
+						sb.append(" dynamic=").append(dynamicCount);
+						sb.append(" (firstItemId=").append(firstDyn.getItemId());
+						sb.append(", firstName=").append(firstDyn.getName() != null ? firstDyn.getName() : "null");
+						sb.append(", firstText=").append(firstDyn.getText() != null ? firstDyn.getText() : "null");
+						sb.append(")");
+					}
+					if (hasStatic)
+					{
+						Widget firstStat = staticChildren[0];
+						sb.append(" static=").append(staticCount);
+						sb.append(" (firstText=").append(firstStat.getText() != null ? firstStat.getText() : "null");
+						sb.append(", firstName=").append(firstStat.getName() != null ? firstStat.getName() : "null");
+						sb.append(")");
+					}
+					log.info(sb.toString());
 				}
 			}
 		}), 2, TimeUnit.SECONDS);
