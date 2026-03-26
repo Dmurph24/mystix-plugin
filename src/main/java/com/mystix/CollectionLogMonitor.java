@@ -24,7 +24,6 @@ import net.runelite.api.WorldView;
 import net.runelite.api.events.ChatMessage;
 import net.runelite.api.events.GameStateChanged;
 import net.runelite.api.events.GameTick;
-import net.runelite.api.events.WidgetLoaded;
 import net.runelite.api.widgets.Widget;
 import net.runelite.client.callback.ClientThread;
 import net.runelite.client.config.ConfigManager;
@@ -32,12 +31,32 @@ import net.runelite.client.eventbus.EventBus;
 import net.runelite.client.eventbus.Subscribe;
 
 /**
- * Monitors the in-game Collection Log interface, captures page data when the player
- * browses it, caches to ConfigManager, and syncs to the Mystix API on login/logout.
+ * Monitors the in-game Collection Log interface (group 621), captures page data
+ * when the player browses it, caches pages to ConfigManager, and syncs to the
+ * Mystix API on login/logout.
  *
- * <p>Uses a GameTick poll to detect when the player navigates to a new page
- * (by checking if the title widget text changed). This is more robust than relying
- * on specific script IDs which can change between game updates.
+ * <h3>How it works</h3>
+ * <ol>
+ *   <li>On each game tick, checks if the collection log is open by reading the
+ *       page header widget (child {@value #CHILD_PAGE_HEADER}).</li>
+ *   <li>When the player navigates to a new page (title text changes), captures
+ *       the page name, tab, kill count, and all items from the widgets.</li>
+ *   <li>Captured pages are cached in-memory and persisted to ConfigManager so
+ *       they survive client restarts.</li>
+ *   <li>On login, the cache is loaded and synced to the API after a short delay.
+ *       On logout, whatever is cached is synced immediately.</li>
+ *   <li>Real-time "new item obtained" events are detected via the game chat
+ *       message and sent individually to the API.</li>
+ * </ol>
+ *
+ * <h3>Widget layout (group 621)</h3>
+ * <pre>
+ *   Child  3: tab header — static children contain the active tab name
+ *   Child  4-8: tab buttons (Bosses, Raids, Clues, Minigames, Other)
+ *   Child 20: page header — first dynamic child's text is the page name
+ *   Child 37: items container — dynamic children are item widgets
+ *   Child 38: kill count area — dynamic children contain "Kills: N" text
+ * </pre>
  */
 @Slf4j
 @Singleton
@@ -45,27 +64,27 @@ public class CollectionLogMonitor
 {
 	private static final int PROFILE_SYNC_DELAY_SECONDS = 5;
 
-	/** Collection log interface group ID. */
+	// ---------------------------------------------------------------------------
+	// Widget constants for the collection log interface (group 621)
+	// ---------------------------------------------------------------------------
 	private static final int COLLECTION_LOG_GROUP_ID = 621;
-
-	/**
-	 * Widget child indices within the collection log interface (group 621).
-	 * Child 20: page header — dynamic children contain the current page name as text.
-	 * Child 37: items container — dynamic children are the item widgets with itemId/quantity/opacity.
-	 * Child 38: kill count area — dynamic children contain KC text lines.
-	 * Child 4-8: tab buttons — name attribute contains the tab name (Bosses, Raids, Clues, etc).
-	 */
+	private static final int CHILD_TAB_HEADER = 3;
 	private static final int CHILD_PAGE_HEADER = 20;
 	private static final int CHILD_ITEMS_CONTAINER = 37;
 	private static final int CHILD_KC_CONTAINER = 38;
-	private static final int CHILD_TAB_BUTTONS_START = 4;
-	private static final int CHILD_TAB_BUTTONS_END = 8;
 
-	private static final String COLLECTION_LOG_CHAT_PREFIX = "New item added to your collection log: ";
+	private static final String COLLECTION_LOG_NEW_ITEM_PREFIX =
+		"New item added to your collection log: ";
 
+	// ---------------------------------------------------------------------------
+	// ConfigManager keys for cache persistence
+	// ---------------------------------------------------------------------------
 	private static final String CONFIG_GROUP = "mystix";
 	private static final String CLOG_CACHE_KEY = "collectionlog_cache";
 
+	// ---------------------------------------------------------------------------
+	// Injected dependencies
+	// ---------------------------------------------------------------------------
 	private final Client client;
 	private final MystixConfig config;
 	private final MystixApiClient apiClient;
@@ -75,12 +94,15 @@ public class CollectionLogMonitor
 	private final ConfigManager configManager;
 	private final Gson gson;
 
+	// ---------------------------------------------------------------------------
+	// State
+	// ---------------------------------------------------------------------------
 	private GameState previousGameState = GameState.UNKNOWN;
 
-	/** The last captured page title, used to detect page changes. */
+	/** The last captured page title — used to detect when the player navigates to a new page. */
 	private String lastCapturedTitle = null;
 
-	/** In-memory cache of captured collection log pages: pageName -> CachedPage. */
+	/** In-memory cache of captured collection log pages, keyed by page name. */
 	private final Map<String, CachedPage> cachedPages = new LinkedHashMap<>();
 
 	@Inject
@@ -119,6 +141,14 @@ public class CollectionLogMonitor
 		log.debug("CollectionLogMonitor stopped");
 	}
 
+	// =========================================================================
+	// Event handlers
+	// =========================================================================
+
+	/**
+	 * On login: load cached pages from ConfigManager and schedule a sync.
+	 * On logout: sync whatever is cached immediately.
+	 */
 	@Subscribe
 	public void onGameStateChanged(GameStateChanged event)
 	{
@@ -126,27 +156,11 @@ public class CollectionLogMonitor
 
 		if (newState == GameState.LOGGED_IN && previousGameState != GameState.LOGGED_IN)
 		{
-			log.debug("Player logged in, waiting for RS profile before collection log sync");
-			clientThread.invokeLater(() ->
-			{
-				if (client.getGameState().getState() < GameState.LOGGED_IN.getState())
-				{
-					return true;
-				}
-				String profileKey = configManager.getRSProfileKey();
-				if (profileKey == null)
-				{
-					return false;
-				}
-				loadCacheFromConfig();
-				log.debug("RS profile ready, scheduling collection log sync in {}s", PROFILE_SYNC_DELAY_SECONDS);
-				executorService.schedule(this::syncCollectionLog, PROFILE_SYNC_DELAY_SECONDS, TimeUnit.SECONDS);
-				return true;
-			});
+			scheduleLoginSync();
 		}
 		else if (previousGameState == GameState.LOGGED_IN && newState != GameState.LOGGED_IN)
 		{
-			log.debug("Player logged out, syncing collection log");
+			log.debug("Player logged out — syncing collection log");
 			syncCollectionLog();
 			lastCapturedTitle = null;
 		}
@@ -155,87 +169,8 @@ public class CollectionLogMonitor
 	}
 
 	/**
-	 * Detects when the collection log interface is opened so we can scan widget structure.
-	 */
-	@Subscribe
-	public void onWidgetLoaded(WidgetLoaded event)
-	{
-		if (event.getGroupId() != COLLECTION_LOG_GROUP_ID)
-		{
-			return;
-		}
-		if (!config.syncCollectionLog())
-		{
-			return;
-		}
-
-		// Scan all children of group 621 after a short delay to let widgets populate.
-		executorService.schedule(() -> clientThread.invokeLater(() ->
-		{
-			log.info("Collection log widget loaded — scanning children of group {}", COLLECTION_LOG_GROUP_ID);
-			for (int i = 0; i < 50; i++)
-			{
-				Widget child = client.getWidget(COLLECTION_LOG_GROUP_ID, i);
-				if (child == null)
-				{
-					continue;
-				}
-				String text = child.getText();
-				String name = child.getName();
-				Widget[] dynamicChildren = child.getDynamicChildren();
-				Widget[] staticChildren = child.getStaticChildren();
-				int dynamicCount = dynamicChildren != null ? dynamicChildren.length : 0;
-				int staticCount = staticChildren != null ? staticChildren.length : 0;
-
-				boolean hasText = text != null && !text.isEmpty();
-				boolean hasName = name != null && !name.isEmpty();
-				boolean hasDynamic = dynamicCount > 0;
-				boolean hasStatic = staticCount > 0;
-				int itemId = child.getItemId();
-
-				if (hasText || hasName || hasDynamic || hasStatic || itemId > 0)
-				{
-					StringBuilder sb = new StringBuilder();
-					sb.append("  Child ").append(i).append(":");
-					if (hasText)
-					{
-						String truncated = text.length() > 100 ? text.substring(0, 100) + "..." : text;
-						sb.append(" text=\"").append(truncated).append("\"");
-					}
-					if (hasName)
-					{
-						sb.append(" name=\"").append(name).append("\"");
-					}
-					if (itemId > 0)
-					{
-						sb.append(" itemId=").append(itemId);
-					}
-					if (hasDynamic)
-					{
-						Widget firstDyn = dynamicChildren[0];
-						sb.append(" dynamic=").append(dynamicCount);
-						sb.append(" (firstItemId=").append(firstDyn.getItemId());
-						sb.append(", firstName=").append(firstDyn.getName() != null ? firstDyn.getName() : "null");
-						sb.append(", firstText=").append(firstDyn.getText() != null ? firstDyn.getText() : "null");
-						sb.append(")");
-					}
-					if (hasStatic)
-					{
-						Widget firstStat = staticChildren[0];
-						sb.append(" static=").append(staticCount);
-						sb.append(" (firstText=").append(firstStat.getText() != null ? firstStat.getText() : "null");
-						sb.append(", firstName=").append(firstStat.getName() != null ? firstStat.getName() : "null");
-						sb.append(")");
-					}
-					log.info(sb.toString());
-				}
-			}
-		}), 2, TimeUnit.SECONDS);
-	}
-
-	/**
-	 * Every game tick, check if the collection log is open and the page changed.
-	 * This replaces script-based detection which is fragile across game updates.
+	 * Every game tick, check if the collection log is open and whether the
+	 * player navigated to a new page. If so, capture it.
 	 */
 	@Subscribe
 	public void onGameTick(GameTick event)
@@ -245,11 +180,11 @@ public class CollectionLogMonitor
 			return;
 		}
 
-		// Read current page name from the page header widget (child 20).
 		String currentPageName = readPageName();
+
 		if (currentPageName == null)
 		{
-			// Collection log is not open — reset so we re-capture if it reopens
+			// Collection log is closed — reset so we re-capture when it reopens.
 			if (lastCapturedTitle != null)
 			{
 				log.debug("Collection log closed");
@@ -258,19 +193,17 @@ public class CollectionLogMonitor
 			return;
 		}
 
-		// Only capture when the page changes
-		if (currentPageName.equals(lastCapturedTitle))
+		if (!currentPageName.equals(lastCapturedTitle))
 		{
-			return;
+			lastCapturedTitle = currentPageName;
+			captureCurrentPage();
 		}
-
-		lastCapturedTitle = currentPageName;
-		captureCurrentPage();
 	}
 
 	/**
-	 * Detects when a new collection log item is obtained via the game chat message.
-	 * Sends a real-time entry event to the API.
+	 * Detects when a new collection log item is obtained via the game chat
+	 * message ("New item added to your collection log: ...") and sends a
+	 * real-time entry event to the API.
 	 */
 	@Subscribe
 	public void onChatMessage(ChatMessage event)
@@ -285,16 +218,12 @@ public class CollectionLogMonitor
 		}
 
 		String message = event.getMessage();
-		if (!message.startsWith(COLLECTION_LOG_CHAT_PREFIX))
+		if (!message.startsWith(COLLECTION_LOG_NEW_ITEM_PREFIX))
 		{
 			return;
 		}
 
-		if (!SyncGuard.hasAppKey(config))
-		{
-			return;
-		}
-		if (GameModeUtil.isSpecialGameMode(client))
+		if (!SyncGuard.hasAppKey(config) || GameModeUtil.isSpecialGameMode(client))
 		{
 			return;
 		}
@@ -305,66 +234,49 @@ public class CollectionLogMonitor
 			return;
 		}
 
-		String itemName = message.substring(COLLECTION_LOG_CHAT_PREFIX.length()).trim();
-
+		String itemName = message.substring(COLLECTION_LOG_NEW_ITEM_PREFIX.length()).trim();
 		int itemId = resolveItemIdFromWidget(itemName);
-		String groupName = readPageName();
-		String tab = readTabName();
-
 		if (itemId <= 0)
 		{
 			log.debug("Could not resolve item ID for collection log entry: {}", itemName);
 			return;
 		}
 
+		String groupName = readPageName();
+		String tab = readTabName();
+
 		CollectionLogEntryPayload payload = new CollectionLogEntryPayload(
-			playerUsername, itemId, groupName != null ? groupName : "Unknown", tab != null ? tab : "Other"
+			playerUsername,
+			itemId,
+			groupName != null ? groupName : "Unknown",
+			tab != null ? tab : "Other"
 		);
 		executorService.submit(() -> apiClient.sendCollectionLogEntry(payload));
-		log.info("Collection log entry detected: {} for player {}", itemName, playerUsername);
+		log.info("New collection log item: {} for player {}", itemName, playerUsername);
 	}
 
-	/**
-	 * Resolves an item name to its item ID from the currently open collection log widget.
-	 * Returns -1 if the log is not open or the item is not found.
-	 */
-	private int resolveItemIdFromWidget(String itemName)
-	{
-		Widget itemsContainer = client.getWidget(COLLECTION_LOG_GROUP_ID, CHILD_ITEMS_CONTAINER);
-		if (itemsContainer == null || itemsContainer.getDynamicChildren() == null)
-		{
-			return -1;
-		}
-
-		for (Widget itemWidget : itemsContainer.getDynamicChildren())
-		{
-			if (itemWidget.getItemId() > 0 && itemWidget.getName() != null
-				&& itemWidget.getName().replaceAll("<[^>]*>", "").equalsIgnoreCase(itemName))
-			{
-				return itemWidget.getItemId();
-			}
-		}
-
-		return -1;
-	}
+	// =========================================================================
+	// Widget reading helpers
+	// =========================================================================
 
 	/**
 	 * Reads the current page name from the page header widget (child 20).
-	 * The first dynamic child with non-empty text is the page name (e.g. "Abyssal Sire").
 	 * Returns null if the collection log is not open.
 	 */
 	private String readPageName()
 	{
-		Widget headerWidget = client.getWidget(COLLECTION_LOG_GROUP_ID, CHILD_PAGE_HEADER);
-		if (headerWidget == null)
+		Widget header = client.getWidget(COLLECTION_LOG_GROUP_ID, CHILD_PAGE_HEADER);
+		if (header == null)
 		{
 			return null;
 		}
-		Widget[] children = headerWidget.getDynamicChildren();
+
+		Widget[] children = header.getDynamicChildren();
 		if (children == null)
 		{
 			return null;
 		}
+
 		for (Widget child : children)
 		{
 			String text = child.getText();
@@ -377,153 +289,43 @@ public class CollectionLogMonitor
 	}
 
 	/**
-	 * Reads the currently displayed collection log page from widgets and caches it.
-	 */
-	private void captureCurrentPage()
-	{
-		try
-		{
-			String pageName = readPageName();
-			if (pageName == null)
-			{
-				log.warn("Could not read page name from collection log title widget");
-				return;
-			}
-
-			String tabName = readTabName();
-			Integer killCount = readKillCount();
-
-			Widget itemsContainer = client.getWidget(COLLECTION_LOG_GROUP_ID, CHILD_ITEMS_CONTAINER);
-			List<CachedItem> items = new ArrayList<>();
-			int totalObtained = 0;
-			int totalItems = 0;
-
-			if (itemsContainer == null)
-			{
-				log.warn("Collection log items container widget (child {}) not found", CHILD_ITEMS_CONTAINER);
-			}
-			else if (itemsContainer.getDynamicChildren() == null)
-			{
-				log.warn("Collection log items container has no dynamic children");
-			}
-			else
-			{
-				for (Widget itemWidget : itemsContainer.getDynamicChildren())
-				{
-					int itemId = itemWidget.getItemId();
-					if (itemId <= 0)
-					{
-						continue;
-					}
-
-					int quantity = itemWidget.getItemQuantity();
-					boolean obtained = itemWidget.getOpacity() == 0;
-
-					items.add(new CachedItem(itemId, obtained ? quantity : 0, obtained));
-					totalItems++;
-					if (obtained)
-					{
-						totalObtained++;
-					}
-				}
-			}
-
-			// Try to resolve NPC ID from nearby NPCs matching the page name
-			Integer npcId = null;
-			String npcName = null;
-			int resolvedId = resolveNpcId(pageName);
-			if (resolvedId != (pageName.hashCode() & 0x7FFFFFFF))
-			{
-				npcId = resolvedId;
-				npcName = pageName;
-			}
-
-			CachedPage page = new CachedPage(
-				pageName, tabName != null ? tabName : "Other",
-				npcId, npcName, killCount,
-				totalObtained, totalItems, items
-			);
-			cachedPages.put(pageName, page);
-
-			log.info("Captured collection log page: {} ({}/{} items, tab={}, kc={})",
-				pageName, totalObtained, totalItems, tabName, killCount);
-
-			saveCacheToConfig();
-		}
-		catch (Exception e)
-		{
-			log.warn("Failed to capture collection log page", e);
-		}
-	}
-
-	/**
-	 * Reads the active tab name from the tab buttons (children 4-8).
-	 * Each tab button's name attribute contains the tab name wrapped in colour tags.
-	 * We strip the tags and return the name. Since we can't easily detect which tab
-	 * is active from the widget alone, we determine the tab by checking which tab's
-	 * page list contains the current page name.
-	 * Falls back to returning the first tab name if detection fails.
+	 * Reads the active tab name from the tab header widget (child 3).
+	 * The static children contain the active tab name wrapped in colour tags.
 	 */
 	private String readTabName()
 	{
-		// The page list sidebar (child 11) contains page names as firstName on dynamic children.
-		// But the simplest approach: tab buttons are children 4-8 in order: Bosses, Raids, Clues, Minigames, Other.
-		// We can read the name attribute which contains the tab name.
-		for (int i = CHILD_TAB_BUTTONS_START; i <= CHILD_TAB_BUTTONS_END; i++)
+		Widget tabHeader = client.getWidget(COLLECTION_LOG_GROUP_ID, CHILD_TAB_HEADER);
+		if (tabHeader == null)
 		{
-			Widget tabWidget = client.getWidget(COLLECTION_LOG_GROUP_ID, i);
-			if (tabWidget == null)
-			{
-				continue;
-			}
-			String name = tabWidget.getName();
+			return null;
+		}
+
+		Widget[] children = tabHeader.getStaticChildren();
+		if (children == null)
+		{
+			return null;
+		}
+
+		for (Widget child : children)
+		{
+			String name = child.getName();
 			if (name != null && !name.isEmpty())
 			{
-				// Check if this tab button appears "active" by checking text color or sprite
-				// The tab widgets have 4 dynamic children (sprites). We check opacity or similar.
-				// For now, use the page header's parent relationship or fall back to checking
-				// all tabs. Since child 3 static child 1 has firstName=current tab, try that.
+				return stripColourTags(name);
 			}
-		}
-
-		// Try child 3's static children — earlier scan showed static=5, firstName=<col=ff9040>Bosses</col>
-		Widget tabHeaderParent = client.getWidget(COLLECTION_LOG_GROUP_ID, 3);
-		if (tabHeaderParent != null)
-		{
-			Widget[] staticChildren = tabHeaderParent.getStaticChildren();
-			if (staticChildren != null)
+			String text = child.getText();
+			if (text != null && !text.isEmpty())
 			{
-				for (Widget child : staticChildren)
-				{
-					String name = child.getName();
-					if (name != null && !name.isEmpty())
-					{
-						return stripColourTags(name);
-					}
-					String text = child.getText();
-					if (text != null && !text.isEmpty())
-					{
-						return stripColourTags(text);
-					}
-				}
+				return stripColourTags(text);
 			}
 		}
-
 		return null;
 	}
 
 	/**
-	 * Strips OSRS colour tags like &lt;col=ff9040&gt;...&lt;/col&gt; from a string.
-	 */
-	private static String stripColourTags(String input)
-	{
-		return input.replaceAll("<[^>]*>", "").trim();
-	}
-
-	/**
 	 * Reads the kill count from the KC container (child 38).
-	 * Dynamic children contain text like "Kills: 500" or "Completions: 150".
-	 * Returns the first numeric value found.
+	 * Looks for text like "Kills: 500" or "Completions: 150" and
+	 * returns the first number found, or null if none.
 	 */
 	private Integer readKillCount()
 	{
@@ -546,47 +348,164 @@ public class CollectionLogMonitor
 			{
 				continue;
 			}
-
-			try
+			Integer value = parseFirstNumber(text);
+			if (value != null)
 			{
-				String[] parts = text.split("[^0-9]+");
-				for (String part : parts)
-				{
-					if (!part.isEmpty())
-					{
-						return Integer.parseInt(part);
-					}
-				}
-			}
-			catch (NumberFormatException e)
-			{
-				// continue to next child
+				return value;
 			}
 		}
-
 		return null;
 	}
 
-	private int resolveNpcId(String npcName)
+	/**
+	 * Reads all items from the items container (child 37) and returns them
+	 * as a list of {@link CachedItem}. An item is "obtained" when its widget
+	 * opacity is 0 (fully visible); unobtained items are dimmed (opacity > 0).
+	 */
+	private List<CachedItem> readItems()
 	{
-		for (NPC npc : getWorldNpcs())
+		Widget container = client.getWidget(COLLECTION_LOG_GROUP_ID, CHILD_ITEMS_CONTAINER);
+		if (container == null || container.getDynamicChildren() == null)
 		{
-			if (npc.getName() != null && npc.getName().equalsIgnoreCase(npcName))
-			{
-				return npc.getId();
-			}
+			return Collections.emptyList();
 		}
-		return npcName.hashCode() & 0x7FFFFFFF;
-	}
 
-	private Iterable<? extends NPC> getWorldNpcs()
-	{
-		WorldView wv = client.getTopLevelWorldView();
-		return wv == null ? Collections.emptyList() : wv.npcs();
+		List<CachedItem> items = new ArrayList<>();
+		for (Widget widget : container.getDynamicChildren())
+		{
+			int itemId = widget.getItemId();
+			if (itemId <= 0)
+			{
+				continue;
+			}
+
+			boolean obtained = widget.getOpacity() == 0;
+			int quantity = obtained ? widget.getItemQuantity() : 0;
+			items.add(new CachedItem(itemId, quantity, obtained));
+		}
+		return items;
 	}
 
 	/**
-	 * Syncs the cached collection log data to the Mystix API.
+	 * Resolves an item name to its item ID by scanning the currently visible
+	 * items container. Returns -1 if the item is not found.
+	 */
+	private int resolveItemIdFromWidget(String itemName)
+	{
+		Widget container = client.getWidget(COLLECTION_LOG_GROUP_ID, CHILD_ITEMS_CONTAINER);
+		if (container == null || container.getDynamicChildren() == null)
+		{
+			return -1;
+		}
+
+		for (Widget widget : container.getDynamicChildren())
+		{
+			if (widget.getItemId() > 0
+				&& widget.getName() != null
+				&& stripColourTags(widget.getName()).equalsIgnoreCase(itemName))
+			{
+				return widget.getItemId();
+			}
+		}
+		return -1;
+	}
+
+	// =========================================================================
+	// Page capture
+	// =========================================================================
+
+	/**
+	 * Reads the currently displayed collection log page from the widgets,
+	 * stores it in the in-memory cache, and persists to ConfigManager.
+	 */
+	private void captureCurrentPage()
+	{
+		try
+		{
+			String pageName = readPageName();
+			if (pageName == null)
+			{
+				return;
+			}
+
+			String tab = readTabName();
+			Integer killCount = readKillCount();
+			List<CachedItem> items = readItems();
+
+			int totalObtained = 0;
+			for (CachedItem item : items)
+			{
+				if (item.obtained)
+				{
+					totalObtained++;
+				}
+			}
+
+			// Try to match the page name to a nearby NPC for the optional FK.
+			Integer npcId = null;
+			String npcName = null;
+			NPC matchedNpc = findNearbyNpcByName(pageName);
+			if (matchedNpc != null)
+			{
+				npcId = matchedNpc.getId();
+				npcName = pageName;
+			}
+
+			CachedPage page = new CachedPage(
+				pageName,
+				tab != null ? tab : "Other",
+				npcId,
+				npcName,
+				killCount,
+				totalObtained,
+				items.size(),
+				items
+			);
+			cachedPages.put(pageName, page);
+			saveCacheToConfig();
+
+			log.info("Captured collection log page: {} ({}/{} obtained, tab={}, kc={})",
+				pageName, totalObtained, items.size(), tab, killCount);
+		}
+		catch (Exception e)
+		{
+			log.warn("Failed to capture collection log page", e);
+		}
+	}
+
+	// =========================================================================
+	// Sync
+	// =========================================================================
+
+	/**
+	 * Waits for the RS profile key to become available, loads the cache from
+	 * ConfigManager, then schedules a sync after a short delay.
+	 */
+	private void scheduleLoginSync()
+	{
+		log.debug("Player logged in — waiting for RS profile before collection log sync");
+		clientThread.invokeLater(() ->
+		{
+			if (client.getGameState().getState() < GameState.LOGGED_IN.getState())
+			{
+				// Player logged out before profile loaded — abort.
+				return true;
+			}
+			if (configManager.getRSProfileKey() == null)
+			{
+				// Profile not ready yet — retry next tick.
+				return false;
+			}
+			loadCacheFromConfig();
+			log.debug("RS profile ready — scheduling collection log sync in {}s", PROFILE_SYNC_DELAY_SECONDS);
+			executorService.schedule(this::syncCollectionLog, PROFILE_SYNC_DELAY_SECONDS, TimeUnit.SECONDS);
+			return true;
+		});
+	}
+
+	/**
+	 * Converts the in-memory cache to a {@link CollectionLogSyncPayload} and
+	 * sends it to the Mystix API.
 	 */
 	private void syncCollectionLog()
 	{
@@ -614,7 +533,7 @@ public class CollectionLogMonitor
 
 		if (cachedPages.isEmpty())
 		{
-			log.info("No collection log data to sync — open your collection log in-game and browse pages to capture data");
+			log.info("No collection log data to sync — open your collection log in-game to capture pages");
 			return;
 		}
 
@@ -626,7 +545,6 @@ public class CollectionLogMonitor
 			{
 				items.add(new CollectionLogSyncPayload.Item(item.itemId, item.quantity, item.obtained));
 			}
-
 			groups.add(new CollectionLogSyncPayload.Group(
 				page.name, page.tab, page.npcId, page.npcName,
 				page.killCount, page.totalObtained, page.totalItems, items
@@ -638,6 +556,11 @@ public class CollectionLogMonitor
 		apiClient.sendCollectionLogSync(payload);
 	}
 
+	// =========================================================================
+	// Cache persistence
+	// =========================================================================
+
+	/** Serializes the in-memory cache to ConfigManager as JSON. */
 	private void saveCacheToConfig()
 	{
 		try
@@ -651,6 +574,7 @@ public class CollectionLogMonitor
 		}
 	}
 
+	/** Loads previously cached pages from ConfigManager into the in-memory map. */
 	private void loadCacheFromConfig()
 	{
 		try
@@ -689,6 +613,59 @@ public class CollectionLogMonitor
 		}
 	}
 
+	// =========================================================================
+	// Utility
+	// =========================================================================
+
+	/** Strips OSRS colour tags like {@code <col=ff9040>...</col>} from a string. */
+	private static String stripColourTags(String input)
+	{
+		return input.replaceAll("<[^>]*>", "").trim();
+	}
+
+	/** Extracts the first integer from a string like "Kills: 500". Returns null if none found. */
+	private static Integer parseFirstNumber(String text)
+	{
+		for (String part : text.split("[^0-9]+"))
+		{
+			if (!part.isEmpty())
+			{
+				try
+				{
+					return Integer.parseInt(part);
+				}
+				catch (NumberFormatException e)
+				{
+					// continue
+				}
+			}
+		}
+		return null;
+	}
+
+	/** Finds a nearby NPC whose name matches the given string, or null if none found. */
+	private NPC findNearbyNpcByName(String name)
+	{
+		WorldView wv = client.getTopLevelWorldView();
+		if (wv == null)
+		{
+			return null;
+		}
+		for (NPC npc : wv.npcs())
+		{
+			if (npc.getName() != null && npc.getName().equalsIgnoreCase(name))
+			{
+				return npc;
+			}
+		}
+		return null;
+	}
+
+	// =========================================================================
+	// Cache data classes (package-private fields + no-arg constructor for GSON)
+	// =========================================================================
+
+	/** A captured collection log page with its metadata and items. */
 	private static class CachedPage
 	{
 		String name;
@@ -700,7 +677,7 @@ public class CollectionLogMonitor
 		int totalItems;
 		List<CachedItem> items;
 
-		@SuppressWarnings("unused")
+		@SuppressWarnings("unused") // used by GSON deserialization
 		CachedPage()
 		{
 		}
@@ -719,13 +696,14 @@ public class CollectionLogMonitor
 		}
 	}
 
+	/** A single item within a collection log page. */
 	private static class CachedItem
 	{
 		int itemId;
 		int quantity;
 		boolean obtained;
 
-		@SuppressWarnings("unused")
+		@SuppressWarnings("unused") // used by GSON deserialization
 		CachedItem()
 		{
 		}
