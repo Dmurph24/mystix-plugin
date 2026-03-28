@@ -135,7 +135,7 @@ public class LootMonitor
 	@Subscribe
 	public void onLootReceived(LootReceived event)
 	{
-		if (event.getType() != LootRecordType.NPC)
+		if (event.getType() != LootRecordType.NPC && event.getType() != LootRecordType.EVENT)
 		{
 			return;
 		}
@@ -299,7 +299,7 @@ public class LootMonitor
 		JsonObject obj = new JsonParser().parse(json).getAsJsonObject();
 
 		String type = obj.has("type") ? obj.get("type").getAsString() : "";
-		if (!"NPC".equals(type))
+		if (!"NPC".equals(type) && !"EVENT".equals(type))
 		{
 			return null;
 		}
