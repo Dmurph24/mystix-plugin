@@ -2,6 +2,7 @@ package com.mystix;
 
 import com.google.inject.Provides;
 import javax.inject.Inject;
+import javax.swing.JOptionPane;
 import javax.swing.SwingUtilities;
 import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.ChatMessageType;
@@ -9,6 +10,7 @@ import net.runelite.api.Client;
 import net.runelite.api.GameState;
 import net.runelite.api.Player;
 import net.runelite.api.events.ChatMessage;
+import net.runelite.client.events.ConfigChanged;
 import net.runelite.api.events.GameStateChanged;
 import net.runelite.client.Notifier;
 import net.runelite.client.config.ConfigManager;
@@ -76,6 +78,7 @@ public class MystixPlugin extends Plugin {
 	private ItemManager itemManager;
 
 	private String lastUsername;
+	private boolean hasShownAppKeyNotice;
 
 	@Override
 	protected void startUp() throws Exception {
@@ -112,9 +115,6 @@ public class MystixPlugin extends Plugin {
 		lootMonitor.start();
 
 		eventBus.register(this);
-
-		SwingUtilities.invokeLater(() -> notifier.notify(
-				"Mystix syncs enabled plugins to the external Mystix server outside of RuneLite. Disable any plugins in Configuration > Mystix you don't want synced to your app."));
 	}
 
 	@Override
@@ -166,6 +166,27 @@ public class MystixPlugin extends Plugin {
 		if (msg != null && msg.contains(TEARS_CAVE_MESSAGE)) {
 			timerMonitor.onTearsOfGuthixCompleted();
 		}
+	}
+
+	@Subscribe
+	public void onConfigChanged(ConfigChanged event) {
+		if (!"mystix".equals(event.getGroup()) || !"mystixAppKey".equals(event.getKey())) {
+			return;
+		}
+		String newValue = event.getNewValue();
+		if (newValue == null || newValue.isBlank()) {
+			return;
+		}
+		if (hasShownAppKeyNotice) {
+			return;
+		}
+		hasShownAppKeyNotice = true;
+		SwingUtilities.invokeLater(() -> JOptionPane.showMessageDialog(
+			null,
+			"Mystix syncs enabled plugins to the external Mystix server outside of RuneLite.\n"
+				+ "You can disable any plugins you don't want synced in Configuration > Mystix.",
+			"Mystix",
+			JOptionPane.INFORMATION_MESSAGE));
 	}
 
 	@Provides
