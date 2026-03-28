@@ -20,6 +20,7 @@ import net.runelite.client.game.ItemManager;
 import net.runelite.client.plugins.Plugin;
 import net.runelite.client.plugins.PluginDescriptor;
 import net.runelite.client.plugins.PluginDependency;
+import net.runelite.client.plugins.loottracker.LootTrackerPlugin;
 import net.runelite.client.plugins.timetracking.TimeTrackingConfig;
 import net.runelite.client.plugins.timetracking.TimeTrackingPlugin;
 import com.mystix.runelite.farming.CompostTracker;
@@ -32,6 +33,7 @@ import com.mystix.wom.WomSyncService;
 @Slf4j
 @PluginDescriptor(name = "Mystix", description = "Syncs Farming Timers, Bank, Skills, Loadout, and Loot data to the Mystix mobile app.")
 @PluginDependency(TimeTrackingPlugin.class)
+@PluginDependency(LootTrackerPlugin.class)
 public class MystixPlugin extends Plugin {
 	private static final String TEARS_CAVE_MESSAGE = "Your stories have entertained me. I will let you into the cave for a short time.";
 
