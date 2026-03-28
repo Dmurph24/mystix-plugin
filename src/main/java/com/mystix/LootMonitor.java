@@ -13,6 +13,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 import javax.inject.Inject;
 import javax.inject.Singleton;
@@ -37,6 +38,7 @@ import net.runelite.http.api.loottracker.LootRecordType;
 public class LootMonitor
 {
 	private static final int PROFILE_SYNC_DELAY_SECONDS = 5;
+	private static final int FLUSH_INTERVAL_SECONDS = 180;
 	private static final String LOOT_TRACKER_CONFIG_GROUP = "loottracker";
 	private static final String LOOT_TRACKER_DROPS_PREFIX = "drops_";
 
@@ -53,6 +55,9 @@ public class LootMonitor
 	private GameState previousGameState = GameState.UNKNOWN;
 	/** Tracks cumulative kill counts per NPC name for the current session. */
 	private final Map<String, Integer> sessionKillCounts = new LinkedHashMap<>();
+	/** Queued loot drops waiting to be flushed to the API. */
+	private final List<LootDropPayload> pendingDrops = new ArrayList<>();
+	private ScheduledFuture<?> flushTask;
 
 	@Inject
 	public LootMonitor(
@@ -80,12 +85,20 @@ public class LootMonitor
 	public void start()
 	{
 		eventBus.register(this);
+		flushTask = executorService.scheduleAtFixedRate(
+			this::flushDrops, FLUSH_INTERVAL_SECONDS, FLUSH_INTERVAL_SECONDS, TimeUnit.SECONDS);
 		log.info("LootMonitor started");
 	}
 
 	public void stop()
 	{
 		eventBus.unregister(this);
+		if (flushTask != null)
+		{
+			flushTask.cancel(false);
+			flushTask = null;
+		}
+		flushDrops();
 		previousGameState = GameState.UNKNOWN;
 		sessionKillCounts.clear();
 		log.debug("LootMonitor stopped");
@@ -120,7 +133,8 @@ public class LootMonitor
 		}
 		else if (previousGameState == GameState.LOGGED_IN && newState != GameState.LOGGED_IN)
 		{
-			log.debug("Player logged out, syncing loot");
+			log.debug("Player logged out, flushing pending drops and syncing loot");
+			flushDrops();
 			syncLoot();
 		}
 
@@ -192,8 +206,32 @@ public class LootMonitor
 		}
 
 		LootDropPayload payload = new LootDropPayload(playerUsername, npcId, npcName, killCount, items);
-		log.info("Loot drop from {} (id={}, kc={}): {} items", npcName, npcId, killCount, items.size());
-		apiClient.sendLootDrop(payload);
+		log.info("Loot drop from {} (id={}, kc={}): {} items (queued)", npcName, npcId, killCount, items.size());
+
+		synchronized (pendingDrops)
+		{
+			pendingDrops.add(payload);
+		}
+	}
+
+	/**
+	 * Flushes all queued loot drops to the API in a single batch request.
+	 */
+	private void flushDrops()
+	{
+		List<LootDropPayload> dropsToSend;
+		synchronized (pendingDrops)
+		{
+			if (pendingDrops.isEmpty())
+			{
+				return;
+			}
+			dropsToSend = new ArrayList<>(pendingDrops);
+			pendingDrops.clear();
+		}
+
+		log.info("Flushing {} loot drops to API", dropsToSend.size());
+		apiClient.sendLootDrops(dropsToSend);
 	}
 
 	/**
