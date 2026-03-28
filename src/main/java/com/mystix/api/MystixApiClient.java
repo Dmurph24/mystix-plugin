@@ -15,7 +15,10 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.function.Consumer;
 import javax.inject.Inject;
 import javax.inject.Singleton;
@@ -85,11 +88,33 @@ public class MystixApiClient
 				payload.getLootRecords().size(), payload.getPlayerUsername()));
 	}
 
-	public void sendLootDrop(LootDropPayload payload)
+	public void sendLootDrops(List<LootDropPayload> drops)
 	{
-		postAsync(LOOT_DROP_ENDPOINT, payload.toJson(gson), "loot-drop",
-			response -> log.info("Mystix loot drop recorded: {} from {} for player: {}",
-				payload.getItems().size(), payload.getNpcName(), payload.getPlayerUsername()));
+		if (drops.isEmpty())
+		{
+			return;
+		}
+
+		// Build batch payload: { player_username, drops: [{npc_id, npc_name, kill_count, items}, ...] }
+		String playerUsername = drops.get(0).getPlayerUsername();
+		List<Map<String, Object>> dropList = new ArrayList<>();
+		for (LootDropPayload drop : drops)
+		{
+			Map<String, Object> dropMap = new LinkedHashMap<>();
+			dropMap.put("npc_id", drop.getNpcId());
+			dropMap.put("npc_name", drop.getNpcName());
+			dropMap.put("kill_count", drop.getKillCount());
+			dropMap.put("items", drop.getItems());
+			dropList.add(dropMap);
+		}
+		Map<String, Object> payload = new LinkedHashMap<>();
+		payload.put("player_username", playerUsername);
+		payload.put("drops", dropList);
+
+		String json = gson.toJson(payload);
+		postAsync(LOOT_DROP_ENDPOINT, json, "loot-drops", LARGE_REQUEST_TIMEOUT,
+			response -> log.info("Mystix loot drops batch recorded: {} drops for player: {}",
+				drops.size(), playerUsername));
 	}
 
 	private void postAsync(String endpoint, String json, String syncType,
