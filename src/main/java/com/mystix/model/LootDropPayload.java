@@ -13,15 +13,17 @@ public class LootDropPayload
 	private final int npc_id;
 	private final String npc_name;
 	private final Integer kill_count;
+	private final String dropped_at;
 	private final List<LootSyncPayload.LootItem> items;
 
 	public LootDropPayload(String playerUsername, int npcId, String npcName, Integer killCount,
-		List<LootSyncPayload.LootItem> items)
+		String droppedAt, List<LootSyncPayload.LootItem> items)
 	{
 		this.player_username = playerUsername;
 		this.npc_id = npcId;
 		this.npc_name = npcName;
 		this.kill_count = killCount;
+		this.dropped_at = droppedAt;
 		this.items = items;
 	}
 
@@ -43,6 +45,11 @@ public class LootDropPayload
 	public Integer getKillCount()
 	{
 		return kill_count;
+	}
+
+	public String getDroppedAt()
+	{
+		return dropped_at;
 	}
 
 	public List<LootSyncPayload.LootItem> getItems()
