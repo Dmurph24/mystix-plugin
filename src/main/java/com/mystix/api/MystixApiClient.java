@@ -104,6 +104,7 @@ public class MystixApiClient
 			dropMap.put("npc_id", drop.getNpcId());
 			dropMap.put("npc_name", drop.getNpcName());
 			dropMap.put("kill_count", drop.getKillCount());
+			dropMap.put("dropped_at", drop.getDroppedAt());
 			dropMap.put("items", drop.getItems());
 			dropList.add(dropMap);
 		}

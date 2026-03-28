@@ -7,6 +7,9 @@ import com.google.gson.JsonParser;
 import com.mystix.api.MystixApiClient;
 import com.mystix.model.LootDropPayload;
 import com.mystix.model.LootSyncPayload;
+import java.time.Instant;
+import java.time.ZoneOffset;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
@@ -205,7 +208,8 @@ public class LootMonitor
 			return;
 		}
 
-		LootDropPayload payload = new LootDropPayload(playerUsername, npcId, npcName, killCount, items);
+		String droppedAt = DateTimeFormatter.ISO_INSTANT.format(Instant.now().atOffset(ZoneOffset.UTC));
+		LootDropPayload payload = new LootDropPayload(playerUsername, npcId, npcName, killCount, droppedAt, items);
 		log.info("Loot drop from {} (id={}, kc={}): {} items (queued)", npcName, npcId, killCount, items.size());
 
 		synchronized (pendingDrops)
