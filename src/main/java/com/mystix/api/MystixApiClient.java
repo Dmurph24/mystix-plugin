@@ -95,8 +95,9 @@ public class MystixApiClient
 			return;
 		}
 
-		// Build batch payload: { player_username, drops: [{npc_id, npc_name, kill_count, items}, ...] }
+		// Build batch payload: { player_username, source_client, drops: [{npc_id, npc_name, kill_count, items}, ...] }
 		String playerUsername = drops.get(0).getPlayerUsername();
+		String sourceClient = drops.get(0).getSourceClient();
 		List<Map<String, Object>> dropList = new ArrayList<>();
 		for (LootDropPayload drop : drops)
 		{
@@ -110,6 +111,7 @@ public class MystixApiClient
 		}
 		Map<String, Object> payload = new LinkedHashMap<>();
 		payload.put("player_username", playerUsername);
+		payload.put("source_client", sourceClient);
 		payload.put("drops", dropList);
 
 		String json = gson.toJson(payload);
