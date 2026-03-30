@@ -10,17 +10,24 @@ import java.util.List;
 public class LootSyncPayload
 {
 	private final String player_username;
+	private final String source_client;
 	private final List<LootRecord> loot_records;
 
-	public LootSyncPayload(String playerUsername, List<LootRecord> lootRecords)
+	public LootSyncPayload(String playerUsername, String sourceClient, List<LootRecord> lootRecords)
 	{
 		this.player_username = playerUsername;
+		this.source_client = sourceClient;
 		this.loot_records = lootRecords;
 	}
 
 	public String getPlayerUsername()
 	{
 		return player_username;
+	}
+
+	public String getSourceClient()
+	{
+		return source_client;
 	}
 
 	public List<LootRecord> getLootRecords()

@@ -15,6 +15,7 @@ import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
@@ -56,6 +57,8 @@ public class LootMonitor
 	private final Gson gson;
 
 	private GameState previousGameState = GameState.UNKNOWN;
+	/** Persistent client identifier unique to this RuneLite installation. */
+	private String clientId;
 	/** Tracks cumulative kill counts per NPC name for the current session. */
 	private final Map<String, Integer> sessionKillCounts = new LinkedHashMap<>();
 	/** Queued loot drops waiting to be flushed to the API. */
@@ -88,6 +91,16 @@ public class LootMonitor
 	public void start()
 	{
 		eventBus.register(this);
+
+		// Read or generate a persistent client ID (per-machine, not per RS profile).
+		clientId = configManager.getConfiguration("mystix", "clientId");
+		if (clientId == null || clientId.isEmpty())
+		{
+			clientId = UUID.randomUUID().toString();
+			configManager.setConfiguration("mystix", "clientId", clientId);
+		}
+		log.debug("LootMonitor client ID: {}", clientId);
+
 		flushTask = executorService.scheduleAtFixedRate(
 			this::flushDrops, FLUSH_INTERVAL_SECONDS, FLUSH_INTERVAL_SECONDS, TimeUnit.SECONDS);
 		log.info("LootMonitor started");
@@ -209,7 +222,7 @@ public class LootMonitor
 		}
 
 		String droppedAt = DateTimeFormatter.ISO_INSTANT.format(Instant.now().atOffset(ZoneOffset.UTC));
-		LootDropPayload payload = new LootDropPayload(playerUsername, npcId, npcName, killCount, droppedAt, items);
+		LootDropPayload payload = new LootDropPayload(playerUsername, clientId, npcId, npcName, killCount, droppedAt, items);
 		log.info("Loot drop from {} (id={}, kc={}): {} items (queued)", npcName, npcId, killCount, items.size());
 
 		synchronized (pendingDrops)
@@ -272,7 +285,7 @@ public class LootMonitor
 			return;
 		}
 
-		LootSyncPayload payload = new LootSyncPayload(playerUsername, lootRecords);
+		LootSyncPayload payload = new LootSyncPayload(playerUsername, clientId, lootRecords);
 		log.info("Syncing {} loot records for player: {}", lootRecords.size(), playerUsername);
 		apiClient.sendLootSync(payload);
 	}

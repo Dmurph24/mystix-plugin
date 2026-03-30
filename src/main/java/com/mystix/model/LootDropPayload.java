@@ -10,16 +10,18 @@ import java.util.List;
 public class LootDropPayload
 {
 	private final String player_username;
+	private final String source_client;
 	private final int npc_id;
 	private final String npc_name;
 	private final Integer kill_count;
 	private final String dropped_at;
 	private final List<LootSyncPayload.LootItem> items;
 
-	public LootDropPayload(String playerUsername, int npcId, String npcName, Integer killCount,
-		String droppedAt, List<LootSyncPayload.LootItem> items)
+	public LootDropPayload(String playerUsername, String sourceClient, int npcId, String npcName,
+		Integer killCount, String droppedAt, List<LootSyncPayload.LootItem> items)
 	{
 		this.player_username = playerUsername;
+		this.source_client = sourceClient;
 		this.npc_id = npcId;
 		this.npc_name = npcName;
 		this.kill_count = killCount;
@@ -30,6 +32,11 @@ public class LootDropPayload
 	public String getPlayerUsername()
 	{
 		return player_username;
+	}
+
+	public String getSourceClient()
+	{
+		return source_client;
 	}
 
 	public int getNpcId()
