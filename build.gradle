@@ -40,7 +40,7 @@ tasks.register('run', JavaExec) {
 	mainClass = pluginMainClass
 
 	jvmArgs "-ea", "--add-exports", "java.desktop/com.apple.eawt=ALL-UNNAMED"
-	args "--developer-mode", "--debug", "--insecure-write-credentials"
+	args "--developer-mode", "--debug"
 }
 
 tasks.register('shadowJar', Jar) {
