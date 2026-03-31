@@ -6,6 +6,8 @@ import com.google.gson.JsonObject;
 import com.mystix.api.MystixApiClient;
 import com.mystix.model.LootDropPayload;
 import com.mystix.model.LootSyncPayload;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
@@ -45,6 +47,7 @@ public class LootMonitor
 	private static final int FLUSH_INTERVAL_SECONDS = 180;
 	private static final String LOOT_TRACKER_CONFIG_GROUP = "loottracker";
 	private static final String LOOT_TRACKER_DROPS_PREFIX = "drops_";
+	private static final String LAST_SYNC_HASH_KEY = "lootSyncHash";
 
 	private final Client client;
 	private final MystixConfig config;
@@ -66,6 +69,8 @@ public class LootMonitor
 	/** Caches NPC name -> NPC ID from NpcLootReceived events (fires before LootReceived). */
 	private final Map<String, Integer> recentNpcIds = new LinkedHashMap<>();
 	private ScheduledFuture<?> flushTask;
+	/** MD5 hash of the last successfully synced loot data, used to skip redundant syncs. */
+	private String lastSyncHash;
 
 	@Inject
 	public LootMonitor(
@@ -120,6 +125,7 @@ public class LootMonitor
 		previousGameState = GameState.UNKNOWN;
 		sessionKillCounts.clear();
 		recentNpcIds.clear();
+		lastSyncHash = null;
 		log.debug("LootMonitor stopped");
 	}
 
@@ -298,9 +304,71 @@ public class LootMonitor
 			return;
 		}
 
+		String currentHash = computeLootHash(lootRecords);
+
+		// Lazily load persisted hash on first sync after start/restart
+		if (lastSyncHash == null)
+		{
+			lastSyncHash = configManager.getRSProfileConfiguration("mystix", LAST_SYNC_HASH_KEY);
+		}
+
+		if (currentHash.equals(lastSyncHash))
+		{
+			log.debug("Loot data unchanged, skipping sync ({} records)", lootRecords.size());
+			return;
+		}
+
 		LootSyncPayload payload = new LootSyncPayload(playerUsername, clientId, lootRecords);
 		log.info("Syncing {} loot records for player: {}", lootRecords.size(), playerUsername);
 		apiClient.sendLootSync(payload);
+
+		lastSyncHash = currentHash;
+		configManager.setRSProfileConfiguration("mystix", LAST_SYNC_HASH_KEY, currentHash);
+	}
+
+	/**
+	 * Computes an MD5 hash of the loot records for change detection.
+	 * Records are sorted by NPC name to ensure deterministic ordering.
+	 */
+	private String computeLootHash(List<LootSyncPayload.LootRecord> records)
+	{
+		try
+		{
+			MessageDigest md = MessageDigest.getInstance("MD5");
+			List<LootSyncPayload.LootRecord> sorted = new ArrayList<>(records);
+			sorted.sort((a, b) -> a.getNpcName().compareTo(b.getNpcName()));
+			for (LootSyncPayload.LootRecord record : sorted)
+			{
+				md.update(record.getNpcName().getBytes(java.nio.charset.StandardCharsets.UTF_8));
+				md.update(intToBytes(record.getNpcId()));
+				md.update(intToBytes(record.getKillCount()));
+				for (LootSyncPayload.LootItem item : record.getItems())
+				{
+					md.update(intToBytes(item.getItemId()));
+					md.update(intToBytes(item.getQuantity()));
+				}
+			}
+			byte[] digest = md.digest();
+			StringBuilder sb = new StringBuilder();
+			for (byte b : digest)
+			{
+				sb.append(String.format("%02x", b & 0xff));
+			}
+			return sb.toString();
+		}
+		catch (NoSuchAlgorithmException e)
+		{
+			// MD5 is guaranteed to be available in all Java implementations
+			throw new RuntimeException(e);
+		}
+	}
+
+	private static byte[] intToBytes(int value)
+	{
+		return new byte[] {
+			(byte) (value >> 24), (byte) (value >> 16),
+			(byte) (value >> 8), (byte) value
+		};
 	}
 
 	/**
