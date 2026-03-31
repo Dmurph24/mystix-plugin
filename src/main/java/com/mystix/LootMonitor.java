@@ -469,7 +469,6 @@ public class LootMonitor
 			items.add(new LootSyncPayload.LootItem(entry.getKey(), entry.getValue()));
 		}
 
-		log.debug("Parsed loot record: {} (id={}, kills={}, items={})", npcName, npcId, killCount, items.size());
 		return new LootSyncPayload.LootRecord(npcId, npcName, killCount, items);
 	}
 
