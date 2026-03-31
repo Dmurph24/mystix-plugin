@@ -10,26 +10,30 @@ import com.mystix.model.LootSyncPayload;
 import com.mystix.model.PlayerSkillsSyncPayload;
 import com.mystix.model.TimerSyncItem;
 import com.mystix.model.TimersSyncPayload;
-import java.net.URI;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
-import java.time.Duration;
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.function.Consumer;
+import java.util.concurrent.TimeUnit;
 import javax.inject.Inject;
 import javax.inject.Singleton;
 import lombok.extern.slf4j.Slf4j;
+import okhttp3.Call;
+import okhttp3.Callback;
+import okhttp3.MediaType;
+import okhttp3.OkHttpClient;
+import okhttp3.Request;
+import okhttp3.RequestBody;
+import okhttp3.Response;
 
 @Slf4j
 @Singleton
 public class MystixApiClient
 {
-	private static final Duration REQUEST_TIMEOUT = Duration.ofSeconds(10);
-	private static final Duration LARGE_REQUEST_TIMEOUT = Duration.ofSeconds(60);
+	private static final long REQUEST_TIMEOUT_SECONDS = 10;
+	private static final long LARGE_REQUEST_TIMEOUT_SECONDS = 60;
+	private static final MediaType JSON_MEDIA_TYPE = MediaType.parse("application/json");
 	private static final String API_BASE_URL = "https://api.mystix.app";
 	private static final String TIMERS_ENDPOINT = "/api/runelite/timers/";
 	private static final String SKILLS_ENDPOINT = "/api/runelite/skills/";
@@ -43,48 +47,53 @@ public class MystixApiClient
 
 	private final MystixConfig config;
 	private final Gson gson;
-	private final HttpClient httpClient;
+	private final OkHttpClient okHttpClient;
+	private final OkHttpClient largeRequestClient;
 
 	@Inject
-	public MystixApiClient(MystixConfig config, Gson gson)
+	public MystixApiClient(MystixConfig config, Gson gson, OkHttpClient okHttpClient)
 	{
 		this.config = config;
 		this.gson = gson;
-		this.httpClient = HttpClient.newBuilder()
-			.connectTimeout(REQUEST_TIMEOUT)
+		this.okHttpClient = okHttpClient.newBuilder()
+			.callTimeout(REQUEST_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+			.build();
+		this.largeRequestClient = okHttpClient.newBuilder()
+			.callTimeout(LARGE_REQUEST_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+			.readTimeout(LARGE_REQUEST_TIMEOUT_SECONDS, TimeUnit.SECONDS)
 			.build();
 	}
 
 	public void sendTimersSync(List<TimerSyncItem> timers)
 	{
 		String json = TimersSyncPayload.toJson(timers);
-		postAsync(TIMERS_ENDPOINT, json, "timers",
-			response -> log.info("Mystix timers sync successful: {} timers", timers.size()));
+		postAsync(TIMERS_ENDPOINT, json, "timers", false,
+			() -> log.info("Mystix timers sync successful: {} timers", timers.size()));
 	}
 
 	public void sendPlayerSkillsSync(PlayerSkillsSyncPayload payload)
 	{
-		postAsync(SKILLS_ENDPOINT, payload.toJson(gson), "skills",
-			response -> log.info("Mystix player skills sync successful for player: {}", payload.getPlayer()));
+		postAsync(SKILLS_ENDPOINT, payload.toJson(gson), "skills", false,
+			() -> log.info("Mystix player skills sync successful for player: {}", payload.getPlayer()));
 	}
 
 	public void sendLoadoutSync(LoadoutSyncPayload payload)
 	{
-		postAsync(LOADOUT_ENDPOINT, payload.toJson(gson), "loadout",
-			response -> log.info("Mystix loadout sync successful for player: {}", payload.getPlayerUsername()));
+		postAsync(LOADOUT_ENDPOINT, payload.toJson(gson), "loadout", false,
+			() -> log.info("Mystix loadout sync successful for player: {}", payload.getPlayerUsername()));
 	}
 
 	public void sendBankSync(BankSyncPayload payload)
 	{
-		postAsync(BANK_ENDPOINT, payload.toJson(gson), "bank",
-			response -> log.info("Mystix bank sync successful: {} items for player: {}",
+		postAsync(BANK_ENDPOINT, payload.toJson(gson), "bank", false,
+			() -> log.info("Mystix bank sync successful: {} items for player: {}",
 				payload.getTotalItemCount(), payload.getPlayerUsername()));
 	}
 
 	public void sendLootSync(LootSyncPayload payload)
 	{
-		postAsync(LOOT_ENDPOINT, payload.toJson(gson), "loot", LARGE_REQUEST_TIMEOUT,
-			response -> log.info("Mystix loot sync successful: {} records for player: {}",
+		postAsync(LOOT_ENDPOINT, payload.toJson(gson), "loot", true,
+			() -> log.info("Mystix loot sync successful: {} records for player: {}",
 				payload.getLootRecords().size(), payload.getPlayerUsername()));
 	}
 
@@ -115,64 +124,58 @@ public class MystixApiClient
 		payload.put("drops", dropList);
 
 		String json = gson.toJson(payload);
-		postAsync(LOOT_DROP_ENDPOINT, json, "loot-drops", LARGE_REQUEST_TIMEOUT,
-			response -> log.info("Mystix loot drops batch recorded: {} drops for player: {}",
+		postAsync(LOOT_DROP_ENDPOINT, json, "loot-drops", true,
+			() -> log.info("Mystix loot drops batch recorded: {} drops for player: {}",
 				drops.size(), playerUsername));
 	}
 
-	private void postAsync(String endpoint, String json, String syncType,
-		Consumer<HttpResponse<String>> onSuccess)
+	private void postAsync(String endpoint, String json, String syncType, boolean largeRequest,
+		Runnable onSuccess)
 	{
-		postAsync(endpoint, json, syncType, REQUEST_TIMEOUT, onSuccess);
-	}
-
-	/**
-	 * Posts a JSON payload to the given API endpoint asynchronously. Validates the app key,
-	 * builds the request with auth headers, and delegates success/error handling to callbacks.
-	 */
-	private void postAsync(String endpoint, String json, String syncType, Duration timeout,
-		Consumer<HttpResponse<String>> onSuccess)
-	{
-		String appKey = config.mystixAppKey();
 		if (!SyncGuard.hasAppKey(config))
 		{
 			log.debug("Skipping {} sync: no Mystix App Key configured", syncType);
 			return;
 		}
 
+		String appKey = config.mystixAppKey();
 		String url = API_BASE_URL + endpoint;
 
-		try
-		{
-			HttpRequest request = HttpRequest.newBuilder()
-				.uri(URI.create(url))
-				.header("Content-Type", "application/json")
-				.header("X-RuneLite-Key", appKey.trim())
-				.timeout(timeout)
-				.POST(HttpRequest.BodyPublishers.ofString(json))
-				.build();
+		Request request = new Request.Builder()
+			.url(url)
+			.header("Content-Type", "application/json")
+			.header("X-RuneLite-Key", appKey.trim())
+			.post(RequestBody.create(JSON_MEDIA_TYPE, json))
+			.build();
 
-			httpClient.sendAsync(request, HttpResponse.BodyHandlers.ofString())
-				.thenAccept(response ->
+		OkHttpClient client = largeRequest ? largeRequestClient : okHttpClient;
+		client.newCall(request).enqueue(new Callback()
+		{
+			@Override
+			public void onFailure(Call call, IOException e)
+			{
+				log.warn("Failed to send {} sync to Mystix API: {}", syncType, e.getMessage());
+			}
+
+			@Override
+			public void onResponse(Call call, Response response)
+			{
+				try
 				{
-					if (response.statusCode() >= HTTP_OK_MIN && response.statusCode() < HTTP_OK_MAX)
+					if (response.code() >= HTTP_OK_MIN && response.code() < HTTP_OK_MAX)
 					{
-						onSuccess.accept(response);
+						onSuccess.run();
 					}
 					else
 					{
-						log.warn("Mystix API returned {} for {} sync", response.statusCode(), syncType);
+						log.warn("Mystix API returned {} for {} sync", response.code(), syncType);
 					}
-				})
-				.exceptionally(ex ->
+				}
+				finally
 				{
-					log.warn("Failed to send {} sync to Mystix API: {}", syncType, ex.getMessage());
-					return null;
-				});
-		}
-		catch (Exception e)
-		{
-			log.warn("Failed to send {} sync: {}", syncType, e.getMessage());
-		}
+					response.close();
+				}
+			}
+		});
 	}
 }

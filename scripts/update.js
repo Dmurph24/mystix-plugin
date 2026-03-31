@@ -1,15 +1,15 @@
 #!/usr/bin/env node
 /**
  * Copies farming and hunter timer classes from RuneLite into this project.
- * Run: npm install && node update.js
+ * Run from repo root: cd scripts && npm install && node update.js
  * Requires RuneLite cloned as a sibling: ../runelite/
  * Based on https://github.com/queicherius/runelite-time-tracking-reminder
  */
 const fs = require('fs-extra')
 const path = require('path')
 
-const RUNELITE_PLUGIN_PATH = path.join(__dirname, '../runelite/runelite-client/src/main/java/net/runelite/client/plugins/timetracking')
-const RUNELITE_COPY_PATH = path.join(__dirname, 'src/main/java/com/mystix/runelite')
+const RUNELITE_PLUGIN_PATH = path.join(__dirname, '../../runelite/runelite-client/src/main/java/net/runelite/client/plugins/timetracking')
+const RUNELITE_COPY_PATH = path.join(__dirname, '../src/main/java/com/mystix/runelite')
 
 // Exclude UI/panel classes we don't need for Mystix
 const IGNORED_FILES = [

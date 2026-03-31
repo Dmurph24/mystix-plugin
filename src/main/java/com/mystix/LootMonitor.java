@@ -3,7 +3,6 @@ package com.mystix;
 import com.google.gson.Gson;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
-import com.google.gson.JsonParser;
 import com.mystix.api.MystixApiClient;
 import com.mystix.model.LootDropPayload;
 import com.mystix.model.LootSyncPayload;
@@ -34,6 +33,7 @@ import net.runelite.client.eventbus.EventBus;
 import net.runelite.client.eventbus.Subscribe;
 import net.runelite.client.game.ItemManager;
 import net.runelite.client.game.ItemStack;
+import net.runelite.client.events.NpcLootReceived;
 import net.runelite.client.plugins.loottracker.LootReceived;
 import net.runelite.http.api.loottracker.LootRecordType;
 
@@ -63,6 +63,8 @@ public class LootMonitor
 	private final Map<String, Integer> sessionKillCounts = new LinkedHashMap<>();
 	/** Queued loot drops waiting to be flushed to the API. */
 	private final List<LootDropPayload> pendingDrops = new ArrayList<>();
+	/** Caches NPC name -> NPC ID from NpcLootReceived events (fires before LootReceived). */
+	private final Map<String, Integer> recentNpcIds = new LinkedHashMap<>();
 	private ScheduledFuture<?> flushTask;
 
 	@Inject
@@ -117,6 +119,7 @@ public class LootMonitor
 		flushDrops();
 		previousGameState = GameState.UNKNOWN;
 		sessionKillCounts.clear();
+		recentNpcIds.clear();
 		log.debug("LootMonitor stopped");
 	}
 
@@ -162,6 +165,16 @@ public class LootMonitor
 	 * LootReceived fires after the loot tracker processes a kill, providing
 	 * the NPC name, kill count (amount), items, and NPC metadata with the ID.
 	 */
+	@Subscribe
+	public void onNpcLootReceived(NpcLootReceived event)
+	{
+		NPC npc = event.getNpc();
+		if (npc != null && npc.getName() != null)
+		{
+			recentNpcIds.put(npc.getName(), npc.getId());
+		}
+	}
+
 	@Subscribe
 	public void onLootReceived(LootReceived event)
 	{
@@ -351,7 +364,7 @@ public class LootMonitor
 	 */
 	private LootSyncPayload.LootRecord parseConfigLootJson(String json)
 	{
-		JsonObject obj = new JsonParser().parse(json).getAsJsonObject();
+		JsonObject obj = gson.fromJson(json, JsonObject.class);
 
 		String type = obj.has("type") ? obj.get("type").getAsString() : "";
 		if (!"NPC".equals(type) && !"EVENT".equals(type))
@@ -412,7 +425,7 @@ public class LootMonitor
 			{
 				return 0;
 			}
-			JsonObject obj = new JsonParser().parse(json).getAsJsonObject();
+			JsonObject obj = gson.fromJson(json, JsonObject.class);
 			return obj.has("kills") ? obj.get("kills").getAsInt() : 0;
 		}
 		catch (Exception e)
@@ -424,28 +437,14 @@ public class LootMonitor
 
 	/**
 	 * Resolves the NPC ID from a LootReceived event.
-	 * Tries to extract from the event metadata, falls back to nearby NPC lookup.
+	 * Checks the cache populated by NpcLootReceived, falls back to nearby NPC lookup.
 	 */
 	private int resolveNpcIdFromEvent(LootReceived event)
 	{
-		// The metadata object is an NpcMetadata which has getId().
-		// Since NpcMetadata is package-private, we use a generic approach.
-		Object metadata = event.getMetadata();
-		if (metadata != null)
+		Integer cachedId = recentNpcIds.get(event.getName());
+		if (cachedId != null && cachedId > 0)
 		{
-			try
-			{
-				// NpcMetadata has a public getId() method
-				int id = (int) metadata.getClass().getMethod("getId").invoke(metadata);
-				if (id > 0)
-				{
-					return id;
-				}
-			}
-			catch (Exception e)
-			{
-				log.debug("Could not extract NPC ID from metadata: {}", e.getMessage());
-			}
+			return cachedId;
 		}
 
 		return resolveNpcId(event.getName());

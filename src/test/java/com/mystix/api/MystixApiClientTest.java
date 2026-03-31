@@ -11,6 +11,7 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
+import okhttp3.OkHttpClient;
 import org.junit.Test;
 
 import static org.junit.Assert.assertNotNull;
@@ -28,7 +29,7 @@ public class MystixApiClientTest {
 
 	@Test
 	public void testSendWithEmptyAppKeyDoesNotThrow() {
-		MystixApiClient client = new MystixApiClient(emptyKeyConfig(), new Gson());
+		MystixApiClient client = new MystixApiClient(emptyKeyConfig(), new Gson(), new OkHttpClient());
 		TimerSyncItem item = new TimerSyncItem("bird house", "fossil island", "bird house",
 				Instant.ofEpochSecond(1700000000L), true, "TestPlayer", null, null, null, 0);
 		client.sendTimersSync(Collections.singletonList(item));
@@ -52,7 +53,7 @@ public class MystixApiClientTest {
 
 	@Test
 	public void testSendPlayerSkillsWithEmptyAppKeyDoesNotThrow() {
-		MystixApiClient client = new MystixApiClient(emptyKeyConfig(), new Gson());
+		MystixApiClient client = new MystixApiClient(emptyKeyConfig(), new Gson(), new OkHttpClient());
 		Map<String, PlayerSkillsSyncPayload.SkillData> skills = new HashMap<>();
 		skills.put("Attack", new PlayerSkillsSyncPayload.SkillData(75, 1200000));
 		skills.put("Defence", new PlayerSkillsSyncPayload.SkillData(70, 800000));
@@ -63,7 +64,7 @@ public class MystixApiClientTest {
 
 	@Test
 	public void testSendBankSyncWithEmptyAppKeyDoesNotThrow() {
-		MystixApiClient client = new MystixApiClient(emptyKeyConfig(), new Gson());
+		MystixApiClient client = new MystixApiClient(emptyKeyConfig(), new Gson(), new OkHttpClient());
 		Map<String, java.util.List<BankSyncPayload.BankItem>> items = new HashMap<>();
 		items.put("bank", Arrays.asList(new BankSyncPayload.BankItem(4151, 1)));
 		BankSyncPayload payload = new BankSyncPayload("TestPlayer", items);
