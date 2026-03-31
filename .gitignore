@@ -14,5 +14,5 @@ AGENTS.md
 nbactions.xml
 nb-configuration.xml
 nbproject/
-.vscode/settings.json
+.vscode/
 node_modules/

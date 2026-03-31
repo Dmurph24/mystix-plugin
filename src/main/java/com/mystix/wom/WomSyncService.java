@@ -1,14 +1,17 @@
 package com.mystix.wom;
 
-import java.net.URI;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
-import java.time.Duration;
+import java.io.IOException;
 import javax.inject.Inject;
 import javax.inject.Singleton;
 import lombok.extern.slf4j.Slf4j;
 import net.runelite.client.util.Text;
+import okhttp3.Call;
+import okhttp3.Callback;
+import okhttp3.MediaType;
+import okhttp3.OkHttpClient;
+import okhttp3.Request;
+import okhttp3.RequestBody;
+import okhttp3.Response;
 
 /**
  * Sends player update requests to the Wise Old Man API.
@@ -18,17 +21,15 @@ import net.runelite.client.util.Text;
 @Singleton
 public class WomSyncService
 {
-	private static final Duration REQUEST_TIMEOUT = Duration.ofSeconds(10);
+	private static final MediaType JSON_MEDIA_TYPE = MediaType.parse("application/json");
 	private static final String WOM_API_BASE = "https://api.wiseoldman.net/v2";
 
-	private final HttpClient httpClient;
+	private final OkHttpClient okHttpClient;
 
 	@Inject
-	public WomSyncService()
+	public WomSyncService(OkHttpClient okHttpClient)
 	{
-		this.httpClient = HttpClient.newBuilder()
-			.connectTimeout(REQUEST_TIMEOUT)
-			.build();
+		this.okHttpClient = okHttpClient;
 	}
 
 	/**
@@ -45,36 +46,39 @@ public class WomSyncService
 		String cleanName = Text.toJagexName(username);
 		String url = WOM_API_BASE + "/players/" + cleanName;
 
-		try
-		{
-			HttpRequest request = HttpRequest.newBuilder()
-				.uri(URI.create(url))
-				.header("Content-Type", "application/json")
-				.timeout(REQUEST_TIMEOUT)
-				.POST(HttpRequest.BodyPublishers.ofString("{}"))
-				.build();
+		Request request = new Request.Builder()
+			.url(url)
+			.header("Content-Type", "application/json")
+			.post(RequestBody.create(JSON_MEDIA_TYPE, "{}"))
+			.build();
 
-			httpClient.sendAsync(request, HttpResponse.BodyHandlers.ofString())
-				.thenAccept(response ->
+		okHttpClient.newCall(request).enqueue(new Callback()
+		{
+			@Override
+			public void onFailure(Call call, IOException e)
+			{
+				log.warn("Failed to send Wise Old Man update for {}: {}", cleanName, e.getMessage());
+			}
+
+			@Override
+			public void onResponse(Call call, Response response)
+			{
+				try
 				{
-					if (response.statusCode() >= 200 && response.statusCode() < 300)
+					if (response.code() >= 200 && response.code() < 300)
 					{
 						log.info("Wise Old Man update successful for {}", cleanName);
 					}
 					else
 					{
-						log.warn("Wise Old Man API returned {} for {}", response.statusCode(), cleanName);
+						log.warn("Wise Old Man API returned {} for {}", response.code(), cleanName);
 					}
-				})
-				.exceptionally(ex ->
+				}
+				finally
 				{
-					log.warn("Failed to send Wise Old Man update for {}: {}", cleanName, ex.getMessage());
-					return null;
-				});
-		}
-		catch (Exception e)
-		{
-			log.warn("Failed to send Wise Old Man update for {}: {}", cleanName, e.getMessage());
-		}
+					response.close();
+				}
+			}
+		});
 	}
 }
