@@ -68,32 +68,32 @@ public class MystixApiClient
 	{
 		String json = TimersSyncPayload.toJson(timers);
 		postAsync(TIMERS_ENDPOINT, json, "timers", false,
-			() -> log.info("Mystix timers sync successful: {} timers", timers.size()));
+			() -> log.debug("Mystix timers sync successful: {} timers", timers.size()));
 	}
 
 	public void sendPlayerSkillsSync(PlayerSkillsSyncPayload payload)
 	{
 		postAsync(SKILLS_ENDPOINT, payload.toJson(gson), "skills", false,
-			() -> log.info("Mystix player skills sync successful for player: {}", payload.getPlayer()));
+			() -> log.debug("Mystix player skills sync successful for player: {}", payload.getPlayer()));
 	}
 
 	public void sendLoadoutSync(LoadoutSyncPayload payload)
 	{
 		postAsync(LOADOUT_ENDPOINT, payload.toJson(gson), "loadout", false,
-			() -> log.info("Mystix loadout sync successful for player: {}", payload.getPlayerUsername()));
+			() -> log.debug("Mystix loadout sync successful for player: {}", payload.getPlayerUsername()));
 	}
 
 	public void sendBankSync(BankSyncPayload payload)
 	{
 		postAsync(BANK_ENDPOINT, payload.toJson(gson), "bank", false,
-			() -> log.info("Mystix bank sync successful: {} items for player: {}",
+			() -> log.debug("Mystix bank sync successful: {} items for player: {}",
 				payload.getTotalItemCount(), payload.getPlayerUsername()));
 	}
 
 	public void sendLootSync(LootSyncPayload payload)
 	{
 		postAsync(LOOT_ENDPOINT, payload.toJson(gson), "loot", true,
-			() -> log.info("Mystix loot sync successful: {} records for player: {}",
+			() -> log.debug("Mystix loot sync successful: {} records for player: {}",
 				payload.getLootRecords().size(), payload.getPlayerUsername()));
 	}
 
@@ -125,7 +125,7 @@ public class MystixApiClient
 
 		String json = gson.toJson(payload);
 		postAsync(LOOT_DROP_ENDPOINT, json, "loot-drops", true,
-			() -> log.info("Mystix loot drops batch recorded: {} drops for player: {}",
+			() -> log.debug("Mystix loot drops batch recorded: {} drops for player: {}",
 				drops.size(), playerUsername));
 	}
 

@@ -21,11 +21,6 @@ public interface MystixConfig extends Config {
 		return true;
 	}
 
-	@ConfigItem(keyName = "syncWiseOldMan", name = "Sync with Wise Old Man", description = "Update your Wise Old Man profile automatically when you log in or out.", position = 3)
-	default boolean syncWiseOldMan() {
-		return true;
-	}
-
 	@ConfigItem(keyName = "syncLoadouts", name = "Sync Loadouts", description = "Sync your active equipment and Inventory Setups loadouts to Mystix.", position = 4)
 	default boolean syncLoadouts() {
 		return true;

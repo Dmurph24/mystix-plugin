@@ -2,16 +2,10 @@ package com.mystix;
 
 import com.google.inject.Provides;
 import javax.inject.Inject;
-import javax.swing.JOptionPane;
-import javax.swing.SwingUtilities;
 import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.ChatMessageType;
 import net.runelite.api.Client;
-import net.runelite.api.GameState;
-import net.runelite.api.Player;
 import net.runelite.api.events.ChatMessage;
-import net.runelite.client.events.ConfigChanged;
-import net.runelite.api.events.GameStateChanged;
 import net.runelite.client.Notifier;
 import net.runelite.client.config.ConfigManager;
 import net.runelite.client.eventbus.EventBus;
@@ -19,21 +13,14 @@ import net.runelite.client.eventbus.Subscribe;
 import net.runelite.client.game.ItemManager;
 import net.runelite.client.plugins.Plugin;
 import net.runelite.client.plugins.PluginDescriptor;
-import net.runelite.client.plugins.PluginDependency;
-import net.runelite.client.plugins.loottracker.LootTrackerPlugin;
 import net.runelite.client.plugins.timetracking.TimeTrackingConfig;
-import net.runelite.client.plugins.timetracking.TimeTrackingPlugin;
 import com.mystix.runelite.farming.CompostTracker;
 import com.mystix.runelite.farming.FarmingTracker;
 import com.mystix.runelite.farming.FarmingWorld;
 import com.mystix.runelite.farming.PaymentTracker;
-import com.mystix.runelite.hunter.BirdHouseTracker;
-import com.mystix.wom.WomSyncService;
 
 @Slf4j
 @PluginDescriptor(name = "Mystix", description = "Syncs Farming Timers, Bank, Skills, Loadout, and Loot data to the Mystix mobile app.")
-@PluginDependency(TimeTrackingPlugin.class)
-@PluginDependency(LootTrackerPlugin.class)
 public class MystixPlugin extends Plugin {
 	private static final String TEARS_CAVE_MESSAGE = "Your stories have entertained me. I will let you into the cave for a short time.";
 
@@ -65,9 +52,6 @@ public class MystixPlugin extends Plugin {
 	private LootMonitor lootMonitor;
 
 	@Inject
-	private WomSyncService womSyncService;
-
-	@Inject
 	private EventBus eventBus;
 
 	@Inject
@@ -79,9 +63,6 @@ public class MystixPlugin extends Plugin {
 	@Inject
 	private ItemManager itemManager;
 
-	private String lastUsername;
-	private boolean hasShownAppKeyNotice;
-
 	@Override
 	protected void startUp() throws Exception {
 		log.debug("Mystix started");
@@ -90,12 +71,6 @@ public class MystixPlugin extends Plugin {
 		FarmingWorld farmingWorld = new FarmingWorld();
 		CompostTracker compostTracker = new CompostTracker(client, farmingWorld, configManager);
 		PaymentTracker paymentTracker = new PaymentTracker(client, configManager, farmingWorld);
-		BirdHouseTracker birdHouseTracker = new BirdHouseTracker(
-				client,
-				itemManager,
-				configManager,
-				timeTrackingConfig,
-				notifier);
 		FarmingTracker farmingTracker = new FarmingTracker(
 				client,
 				itemManager,
@@ -106,22 +81,32 @@ public class MystixPlugin extends Plugin {
 				compostTracker,
 				paymentTracker);
 
-		timerMonitor.initialize(farmingTracker, birdHouseTracker, farmingWorld);
-		timerMonitor.start();
-
-		playerSkillsMonitor.start();
-		bankMemoryMonitor.start();
-		vaultMonitor.start();
-		potionStorageMonitor.start();
-		loadoutMonitor.start();
-		lootMonitor.start();
+		timerMonitor.initialize(farmingTracker, farmingWorld);
 
 		eventBus.register(this);
+		eventBus.register(timerMonitor);
+		eventBus.register(playerSkillsMonitor);
+		eventBus.register(bankMemoryMonitor);
+		eventBus.register(vaultMonitor);
+		eventBus.register(potionStorageMonitor);
+		eventBus.register(loadoutMonitor);
+		eventBus.register(lootMonitor);
+
+		timerMonitor.start();
+		lootMonitor.start();
 	}
 
 	@Override
 	protected void shutDown() throws Exception {
 		eventBus.unregister(this);
+		eventBus.unregister(timerMonitor);
+		eventBus.unregister(playerSkillsMonitor);
+		eventBus.unregister(bankMemoryMonitor);
+		eventBus.unregister(vaultMonitor);
+		eventBus.unregister(potionStorageMonitor);
+		eventBus.unregister(loadoutMonitor);
+		eventBus.unregister(lootMonitor);
+
 		timerMonitor.stop();
 		playerSkillsMonitor.stop();
 		bankMemoryMonitor.stop();
@@ -129,34 +114,7 @@ public class MystixPlugin extends Plugin {
 		potionStorageMonitor.stop();
 		loadoutMonitor.stop();
 		lootMonitor.stop();
-		lastUsername = null;
 		log.debug("Mystix stopped");
-	}
-
-	@Subscribe
-	public void onGameStateChanged(GameStateChanged event) {
-		if (!config.syncWiseOldMan()) {
-			return;
-		}
-		if (GameModeUtil.isSpecialGameMode(client)) {
-			log.debug("WOM sync skipped: special game mode detected (Leagues, DMM, etc.)");
-			return;
-		}
-
-		GameState state = event.getGameState();
-
-		if (state == GameState.LOGGED_IN) {
-			Player local = client.getLocalPlayer();
-			if (local != null && local.getName() != null && !local.getName().isBlank()) {
-				lastUsername = local.getName();
-				womSyncService.updatePlayer(lastUsername);
-			}
-		} else if (state == GameState.LOGIN_SCREEN || state == GameState.HOPPING) {
-			if (lastUsername != null) {
-				womSyncService.updatePlayer(lastUsername);
-				lastUsername = null;
-			}
-		}
 	}
 
 	@Subscribe
@@ -168,27 +126,6 @@ public class MystixPlugin extends Plugin {
 		if (msg != null && msg.contains(TEARS_CAVE_MESSAGE)) {
 			timerMonitor.onTearsOfGuthixCompleted();
 		}
-	}
-
-	@Subscribe
-	public void onConfigChanged(ConfigChanged event) {
-		if (!"mystix".equals(event.getGroup()) || !"mystixAppKey".equals(event.getKey())) {
-			return;
-		}
-		String newValue = event.getNewValue();
-		if (newValue == null || newValue.isBlank()) {
-			return;
-		}
-		if (hasShownAppKeyNotice) {
-			return;
-		}
-		hasShownAppKeyNotice = true;
-		SwingUtilities.invokeLater(() -> JOptionPane.showMessageDialog(
-			null,
-			"Mystix syncs enabled plugins to the external Mystix server outside of RuneLite.\n"
-				+ "You can disable any plugins you don't want synced in Configuration > Mystix.",
-			"Mystix",
-			JOptionPane.INFORMATION_MESSAGE));
 	}
 
 	@Provides

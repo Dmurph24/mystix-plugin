@@ -11,13 +11,17 @@ const path = require('path')
 const RUNELITE_PLUGIN_PATH = path.join(__dirname, '../../runelite/runelite-client/src/main/java/net/runelite/client/plugins/timetracking')
 const RUNELITE_COPY_PATH = path.join(__dirname, '../src/main/java/com/mystix/runelite')
 
-// Exclude UI/panel classes we don't need for Mystix
+// Exclude UI/panel classes we don't need for Mystix, plus the vendored BirdHouseTracker stack —
+// Mystix reads bird house state directly from the timetracking RS profile config in TimerMonitor.
 const IGNORED_FILES = [
   'FarmingTabPanel.java',
   'FarmingNextTickPanel.java',
   'FarmingContractInfoBox.java',
   'FarmingContractManager.java',
   'BirdHouseTabPanel.java',
+  'BirdHouseTracker.java',
+  'BirdHouseData.java',
+  'BirdHouseState.java',
 ]
 
 function patchCopiedFiles(search, replace) {
@@ -83,7 +87,6 @@ patchCopiedFiles(/\s*@Singleton\n/g, '\n')
 console.log('Patching: Make classes and constructors public')
 patchCopiedFiles(/access = AccessLevel\.PACKAGE,?/g, '')
 patchCopiedFiles(/access = AccessLevel\.PRIVATE,?/g, '')
-patchCopiedFiles('private BirdHouseTracker(', 'public BirdHouseTracker(')
 patchCopiedFiles('private void updateCompletionTime', 'public void updateCompletionTime')
 patchCopiedFiles('private FarmingTracker(', 'public FarmingTracker(')
 patchCopiedFiles(/\bclass FarmingWorld\b/, 'public class FarmingWorld')
@@ -92,9 +95,7 @@ patchCopiedFiles(/\bclass FarmingPatch\b/, 'public class FarmingPatch')
 patchCopiedFiles(/\bclass PatchPrediction\b/, 'public class PatchPrediction')
 patchCopiedFiles(/\tFarmingRegion\(/, '\tpublic FarmingRegion(')
 
-console.log('Patching: Stub UI methods (BirdHouseTabPanel/FarmingTabPanel not copied)')
-patchCopiedFiles('public BirdHouseTabPanel createBirdHouseTabPanel()', 'public Object createBirdHouseTabPanel()')
-patchCopiedFiles('return new BirdHouseTabPanel(configManager, itemManager, this, config);', 'return null;')
+console.log('Patching: Stub UI methods (FarmingTabPanel not copied)')
 patchCopiedFiles('public FarmingTabPanel createTabPanel(Tab tab, FarmingContractManager farmingContractManager)', 'public Object createTabPanel(Tab tab, Object farmingContractManager)')
 patchCopiedFiles('return new FarmingTabPanel(this, compostTracker, paymentTracker, itemManager, configManager, config, farmingWorld.getTabs().get(tab), farmingContractManager);', 'return null;')
 
@@ -103,32 +104,6 @@ patchCopiedFiles(
   /configManager\.setRSProfileConfiguration\([^)]+\);/g,
   '/* config write removed - Mystix is read-only */'
 )
-
-console.log('Patching: Add getEntityIdForCompletionTime to BirdHouseTracker')
-const birdHouseTrackerPath = path.join(RUNELITE_COPY_PATH, 'hunter', 'BirdHouseTracker.java')
-if (fs.existsSync(birdHouseTrackerPath)) {
-  let content = fs.readFileSync(birdHouseTrackerPath, 'utf-8')
-  const method = `
-	/**
-	 * Returns the OSRS item ID of a bird house that completes at the given time, or null if not found.
-	 * Used by Mystix for entity_id in timer sync.
-	 */
-	public Integer getEntityIdForCompletionTime(long completionTime) {
-		for (BirdHouseData data : birdHouseData.values()) {
-			if (BirdHouseState.fromVarpValue(data.getVarp()) == BirdHouseState.SEEDED
-				&& data.getTimestamp() + BIRD_HOUSE_DURATION == completionTime) {
-				BirdHouse birdHouse = BirdHouse.fromVarpValue(data.getVarp());
-				if (birdHouse != null) {
-					return birdHouse.getItemID();
-				}
-			}
-		}
-		return null;
-	}
-`
-  content = content.replace(/\n}$/, method + '\n}')
-  fs.writeFileSync(birdHouseTrackerPath, content, 'utf-8')
-}
 
 console.log('Patching: Add generation comment')
 const GENERATED_COMMENT = '// Auto-generated from RuneLite. Do not edit. Run: node update.js\n\n'

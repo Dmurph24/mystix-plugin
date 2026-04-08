@@ -16,7 +16,6 @@ import net.runelite.api.Client;
 import net.runelite.api.ItemContainer;
 import net.runelite.api.events.ItemContainerChanged;
 import net.runelite.api.gameval.InventoryID;
-import net.runelite.client.eventbus.EventBus;
 import net.runelite.client.eventbus.Subscribe;
 import net.runelite.client.game.ItemManager;
 
@@ -31,7 +30,6 @@ public class BankMemoryMonitor {
 	private final Client client;
 	private final MystixConfig config;
 	private final MystixApiClient apiClient;
-	private final EventBus eventBus;
 	private final ItemManager itemManager;
 	private final Gson gson;
 	private final ScheduledExecutorService executor;
@@ -46,26 +44,18 @@ public class BankMemoryMonitor {
 			Client client,
 			MystixConfig config,
 			MystixApiClient apiClient,
-			EventBus eventBus,
 			ItemManager itemManager,
 			Gson gson,
 			ScheduledExecutorService executor) {
 		this.client = client;
 		this.config = config;
 		this.apiClient = apiClient;
-		this.eventBus = eventBus;
 		this.itemManager = itemManager;
 		this.gson = gson;
 		this.executor = executor;
 	}
 
-	public void start() {
-		eventBus.register(this);
-		log.info("BankMemoryMonitor started");
-	}
-
 	public void stop() {
-		eventBus.unregister(this);
 		if (pendingSync != null) {
 			pendingSync.cancel(false);
 		}
@@ -73,7 +63,6 @@ public class BankMemoryMonitor {
 		lastSyncJson = null;
 		pendingJson = null;
 		pendingPayload = null;
-		log.debug("BankMemoryMonitor stopped");
 	}
 
 	/**
@@ -147,7 +136,7 @@ public class BankMemoryMonitor {
 			return;
 		}
 		lastSyncJson = pendingJson;
-		log.info("Syncing {} bank items for player: {}", pendingPayload.getTotalItemCount(), pendingPayload.getPlayerUsername());
+		log.debug("Syncing {} bank items for player: {}", pendingPayload.getTotalItemCount(), pendingPayload.getPlayerUsername());
 		apiClient.sendBankSync(pendingPayload);
 		pendingPayload = null;
 		pendingJson = null;

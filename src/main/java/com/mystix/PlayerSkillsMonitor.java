@@ -14,7 +14,6 @@ import net.runelite.api.GameState;
 import net.runelite.api.Player;
 import net.runelite.api.Skill;
 import net.runelite.api.events.GameStateChanged;
-import net.runelite.client.eventbus.EventBus;
 import net.runelite.client.eventbus.Subscribe;
 
 @Slf4j
@@ -25,7 +24,6 @@ public class PlayerSkillsMonitor {
 	private final Client client;
 	private final MystixConfig config;
 	private final MystixApiClient apiClient;
-	private final EventBus eventBus;
 	private final ScheduledExecutorService executorService;
 
 	private GameState previousGameState = GameState.UNKNOWN;
@@ -35,24 +33,15 @@ public class PlayerSkillsMonitor {
 			Client client,
 			MystixConfig config,
 			MystixApiClient apiClient,
-			EventBus eventBus,
 			ScheduledExecutorService executorService) {
 		this.client = client;
 		this.config = config;
 		this.apiClient = apiClient;
-		this.eventBus = eventBus;
 		this.executorService = executorService;
 	}
 
-	public void start() {
-		eventBus.register(this);
-		log.info("PlayerSkillsMonitor started");
-	}
-
 	public void stop() {
-		eventBus.unregister(this);
 		previousGameState = GameState.UNKNOWN;
-		log.debug("PlayerSkillsMonitor stopped");
 	}
 
 	@Subscribe
@@ -104,7 +93,7 @@ public class PlayerSkillsMonitor {
 		int combatLevel = localPlayer.getCombatLevel();
 
 		PlayerSkillsSyncPayload payload = new PlayerSkillsSyncPayload(playerUsername, skills, totalLevel, combatLevel);
-		log.info("Syncing {} skills for player: {} (Total Level: {}, Combat Level: {})",
+		log.debug("Syncing {} skills for player: {} (Total Level: {}, Combat Level: {})",
 				skills.size(), playerUsername, totalLevel, combatLevel);
 		apiClient.sendPlayerSkillsSync(payload);
 	}

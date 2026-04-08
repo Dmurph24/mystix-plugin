@@ -25,7 +25,6 @@ import net.runelite.api.gameval.InterfaceID;
 import net.runelite.api.gameval.ItemID;
 import net.runelite.api.gameval.VarPlayerID;
 import net.runelite.api.widgets.Widget;
-import net.runelite.client.eventbus.EventBus;
 import net.runelite.client.eventbus.Subscribe;
 
 /**
@@ -42,7 +41,6 @@ public class PotionStorageMonitor {
 	private final Client client;
 	private final MystixConfig config;
 	private final MystixApiClient apiClient;
-	private final EventBus eventBus;
 	private final Gson gson;
 
 	private Set<Integer> potionStoreVarps;
@@ -54,26 +52,17 @@ public class PotionStorageMonitor {
 			Client client,
 			MystixConfig config,
 			MystixApiClient apiClient,
-			EventBus eventBus,
 			Gson gson) {
 		this.client = client;
 		this.config = config;
 		this.apiClient = apiClient;
-		this.eventBus = eventBus;
 		this.gson = gson;
 	}
 
-	public void start() {
-		eventBus.register(this);
-		log.info("PotionStorageMonitor started");
-	}
-
 	public void stop() {
-		eventBus.unregister(this);
 		potionStoreVarps = null;
 		needsRebuild = false;
 		lastSyncJson = null;
-		log.debug("PotionStorageMonitor stopped");
 	}
 
 	@Subscribe
@@ -149,7 +138,7 @@ public class PotionStorageMonitor {
 		}
 
 		lastSyncJson = json;
-		log.info("Syncing {} potion storage items for player: {}", items.size(), playerUsername);
+		log.debug("Syncing {} potion storage items for player: {}", items.size(), playerUsername);
 		apiClient.sendBankSync(payload);
 	}
 
