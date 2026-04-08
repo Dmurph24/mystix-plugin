@@ -13,7 +13,6 @@ import net.runelite.api.Client;
 import net.runelite.api.ItemContainer;
 import net.runelite.api.events.ItemContainerChanged;
 import net.runelite.api.gameval.InventoryID;
-import net.runelite.client.eventbus.EventBus;
 import net.runelite.client.eventbus.Subscribe;
 import net.runelite.client.game.ItemManager;
 
@@ -33,7 +32,6 @@ public class VaultMonitor {
 	private final Client client;
 	private final MystixConfig config;
 	private final MystixApiClient apiClient;
-	private final EventBus eventBus;
 	private final ItemManager itemManager;
 	private final Gson gson;
 
@@ -44,26 +42,17 @@ public class VaultMonitor {
 			Client client,
 			MystixConfig config,
 			MystixApiClient apiClient,
-			EventBus eventBus,
 			ItemManager itemManager,
 			Gson gson) {
 		this.client = client;
 		this.config = config;
 		this.apiClient = apiClient;
-		this.eventBus = eventBus;
 		this.itemManager = itemManager;
 		this.gson = gson;
 	}
 
-	public void start() {
-		eventBus.register(this);
-		log.info("VaultMonitor started");
-	}
-
 	public void stop() {
-		eventBus.unregister(this);
 		lastSyncJsonBySource.clear();
-		log.debug("VaultMonitor stopped");
 	}
 
 	@Subscribe
@@ -112,7 +101,7 @@ public class VaultMonitor {
 		}
 
 		lastSyncJsonBySource.put(source, json);
-		log.info("Syncing {} {} items for player: {}", items.size(), source, playerUsername);
+		log.debug("Syncing {} {} items for player: {}", items.size(), source, playerUsername);
 		apiClient.sendBankSync(payload);
 	}
 }

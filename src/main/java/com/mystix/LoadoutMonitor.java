@@ -25,7 +25,6 @@ import net.runelite.api.events.ItemContainerChanged;
 import net.runelite.api.gameval.InventoryID;
 import net.runelite.client.config.ConfigManager;
 import net.runelite.client.callback.ClientThread;
-import net.runelite.client.eventbus.EventBus;
 import net.runelite.client.eventbus.Subscribe;
 import net.runelite.client.game.ItemManager;
 
@@ -60,7 +59,6 @@ public class LoadoutMonitor {
 	private final ClientThread clientThread;
 	private final MystixConfig config;
 	private final MystixApiClient apiClient;
-	private final EventBus eventBus;
 	private final ScheduledExecutorService executorService;
 	private final ConfigManager configManager;
 	private final ItemManager itemManager;
@@ -76,7 +74,6 @@ public class LoadoutMonitor {
 			ClientThread clientThread,
 			MystixConfig config,
 			MystixApiClient apiClient,
-			EventBus eventBus,
 			ScheduledExecutorService executorService,
 			ConfigManager configManager,
 			ItemManager itemManager,
@@ -85,27 +82,19 @@ public class LoadoutMonitor {
 		this.clientThread = clientThread;
 		this.config = config;
 		this.apiClient = apiClient;
-		this.eventBus = eventBus;
 		this.executorService = executorService;
 		this.configManager = configManager;
 		this.itemManager = itemManager;
 		this.gson = gson;
 	}
 
-	public void start() {
-		eventBus.register(this);
-		log.info("LoadoutMonitor started");
-	}
-
 	public void stop() {
-		eventBus.unregister(this);
 		if (debounceFuture != null) {
 			debounceFuture.cancel(false);
 			debounceFuture = null;
 		}
 		previousGameState = GameState.UNKNOWN;
 		lastSyncJson = null;
-		log.debug("LoadoutMonitor stopped");
 	}
 
 	@Subscribe
@@ -188,7 +177,7 @@ public class LoadoutMonitor {
 		}
 
 		lastSyncJson = json;
-		log.info("Syncing {} loadout sets for player: {}", loadoutSets.size(), playerUsername);
+		log.debug("Syncing {} loadout sets for player: {}", loadoutSets.size(), playerUsername);
 		apiClient.sendLoadoutSync(payload);
 	}
 

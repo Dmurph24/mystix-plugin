@@ -3,6 +3,7 @@ package com.mystix;
 import com.mystix.api.MystixApiClient;
 import com.mystix.model.TimerSyncItem;
 import com.mystix.model.TimersSyncPayload;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.time.ZonedDateTime;
@@ -14,7 +15,6 @@ import java.util.concurrent.TimeUnit;
 import javax.inject.Inject;
 import javax.inject.Singleton;
 import net.runelite.api.events.GameStateChanged;
-import net.runelite.client.eventbus.EventBus;
 import net.runelite.client.eventbus.Subscribe;
 import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.Client;
@@ -27,10 +27,7 @@ import com.mystix.runelite.farming.FarmingTracker;
 import com.mystix.runelite.farming.PatchPrediction;
 import com.mystix.runelite.farming.Produce;
 import com.mystix.runelite.hunter.BirdHouse;
-import com.mystix.runelite.hunter.BirdHouseData;
 import com.mystix.runelite.hunter.BirdHouseSpace;
-import com.mystix.runelite.hunter.BirdHouseState;
-import com.mystix.runelite.hunter.BirdHouseTracker;
 
 @Slf4j
 @Singleton
@@ -40,16 +37,16 @@ public class TimerMonitor {
 	private static final int LOGIN_SYNC_DELAY_SECONDS = 3;
 	private static final int TEARS_OF_GUTHIX_RESET_DAYS = 7;
 	private static final int LEAGUES_GROWTH_RATE_DIVISOR = 5;
+	// Average time to harvest 10 birds, matches RuneLite's BirdHouseTracker.BIRD_HOUSE_DURATION.
+	private static final long BIRD_HOUSE_DURATION_SECONDS = Duration.ofMinutes(50).getSeconds();
 
 	private final Client client;
 	private final MystixConfig config;
 	private final MystixApiClient apiClient;
 	private final ConfigManager configManager;
 	private final ScheduledExecutorService executorService;
-	private final EventBus eventBus;
 
 	private FarmingTracker farmingTracker;
-	private BirdHouseTracker birdHouseTracker;
 	private com.mystix.runelite.farming.FarmingWorld farmingWorld;
 	private ScheduledFuture<?> scheduledFuture;
 	private String lastSentSnapshot;
@@ -62,42 +59,35 @@ public class TimerMonitor {
 			MystixConfig config,
 			MystixApiClient apiClient,
 			ConfigManager configManager,
-			ScheduledExecutorService executorService,
-			EventBus eventBus) {
+			ScheduledExecutorService executorService) {
 		this.client = client;
 		this.config = config;
 		this.apiClient = apiClient;
 		this.configManager = configManager;
 		this.executorService = executorService;
-		this.eventBus = eventBus;
 	}
 
-	public void initialize(FarmingTracker farmingTracker, BirdHouseTracker birdHouseTracker,
-			com.mystix.runelite.farming.FarmingWorld farmingWorld) {
+	public void initialize(FarmingTracker farmingTracker, com.mystix.runelite.farming.FarmingWorld farmingWorld) {
 		this.farmingTracker = farmingTracker;
-		this.birdHouseTracker = birdHouseTracker;
 		this.farmingWorld = farmingWorld;
 	}
 
 	public void start() {
-		if (farmingTracker == null || birdHouseTracker == null) {
+		if (farmingTracker == null) {
 			log.warn("TimerMonitor not initialized; skipping start");
 			return;
 		}
 		if (scheduledFuture != null) {
 			return;
 		}
-		eventBus.register(this);
 		scheduledFuture = executorService.scheduleAtFixedRate(
 				this::sync,
 				INITIAL_DELAY_SECONDS,
 				SYNC_INTERVAL_SECONDS,
 				TimeUnit.SECONDS);
-		log.info("TimerMonitor started; first sync in {}s, then every {}s", INITIAL_DELAY_SECONDS, SYNC_INTERVAL_SECONDS);
 	}
 
 	public void stop() {
-		eventBus.unregister(this);
 		if (scheduledFuture != null) {
 			scheduledFuture.cancel(false);
 			scheduledFuture = null;
@@ -105,7 +95,6 @@ public class TimerMonitor {
 		lastSentSnapshot = null;
 		tearsOfGuthixNextReset = null;
 		previousGameState = GameState.UNKNOWN;
-		log.debug("TimerMonitor stopped");
 	}
 
 	@Subscribe
@@ -128,7 +117,7 @@ public class TimerMonitor {
 		ZonedDateTime completionDayStart = nowUtc.toLocalDate().atStartOfDay(ZoneOffset.UTC);
 		tearsOfGuthixNextReset = completionDayStart.plusDays(TEARS_OF_GUTHIX_RESET_DAYS).toInstant();
 		lastSentSnapshot = null;
-		log.info("Tears of Guthix completed; next reset at {}", tearsOfGuthixNextReset);
+		log.debug("Tears of Guthix completed; next reset at {}", tearsOfGuthixNextReset);
 	}
 
 	/**
@@ -160,8 +149,6 @@ public class TimerMonitor {
 		}
 
 		farmingTracker.loadCompletionTimes();
-		birdHouseTracker.loadFromConfig();
-		birdHouseTracker.updateCompletionTime();
 		farmingTracker.updateCompletionTime();
 
 		boolean syncEnabled = config.syncTimeTracking();
@@ -174,7 +161,7 @@ public class TimerMonitor {
 		String snapshot = TimersSyncPayload.toJson(timers);
 		if (!snapshot.equals(lastSentSnapshot)) {
 			lastSentSnapshot = snapshot;
-			log.info("Mystix syncing {} timer(s) for {}", timers.size(), playerUsername);
+			log.debug("Mystix syncing {} timer(s) for {}", timers.size(), playerUsername);
 			apiClient.sendTimersSync(timers);
 		}
 	}
@@ -246,28 +233,46 @@ public class TimerMonitor {
 	}
 
 	/**
-	 * Iterates bird house spaces, builds a TimerSyncItem for each seeded house
-	 * that has not yet completed, and appends them to the timers list.
+	 * Reads bird house state directly from the {@code timetracking} RS profile config
+	 * (written by the core Time Tracking plugin) and emits a TimerSyncItem for each
+	 * seeded house that has not yet completed.
 	 */
 	private void collectBirdHouseTimers(List<TimerSyncItem> timers, String playerUsername, boolean syncEnabled) {
 		boolean birdHouseNotify = syncEnabled && isBirdHouseNotifyEnabled();
+		long now = Instant.now().getEpochSecond();
 
-		for (var bhEntry : birdHouseTracker.getBirdHouseData().entrySet()) {
-			BirdHouseSpace space = bhEntry.getKey();
-			BirdHouseData data = bhEntry.getValue();
-
-			if (BirdHouseState.fromVarpValue(data.getVarp()) != BirdHouseState.SEEDED) {
+		for (BirdHouseSpace space : BirdHouseSpace.values()) {
+			String key = TimeTrackingConfig.BIRD_HOUSE + "." + space.getVarp();
+			String stored = configManager.getRSProfileConfiguration(TimeTrackingConfig.CONFIG_GROUP, key);
+			if (stored == null) {
 				continue;
 			}
 
-			long spaceCompletionTime = data.getTimestamp() + BirdHouseTracker.BIRD_HOUSE_DURATION;
-			if (spaceCompletionTime <= Instant.now().getEpochSecond()) {
+			String[] parts = stored.split(":");
+			if (parts.length != 2) {
 				continue;
 			}
 
-			Instant completedAt = Instant.ofEpochSecond(spaceCompletionTime);
-			Instant startedAt = Instant.ofEpochSecond(data.getTimestamp());
-			BirdHouse birdHouse = BirdHouse.fromVarpValue(data.getVarp());
+			int varp;
+			long timestamp;
+			try {
+				varp = Integer.parseInt(parts[0]);
+				timestamp = Long.parseLong(parts[1]);
+			} catch (NumberFormatException e) {
+				continue;
+			}
+
+			// Seeded when varp is a positive multiple of 3; see RuneLite BirdHouseState.
+			if (varp <= 0 || varp % 3 != 0) {
+				continue;
+			}
+
+			long spaceCompletionTime = timestamp + BIRD_HOUSE_DURATION_SECONDS;
+			if (spaceCompletionTime <= now) {
+				continue;
+			}
+
+			BirdHouse birdHouse = BirdHouse.fromVarpValue(varp);
 			Integer birdHouseEntityId = birdHouse != null ? birdHouse.getItemID() : null;
 			String entityName = birdHouse != null ? birdHouse.getName() : "Bird House";
 
@@ -275,10 +280,10 @@ public class TimerMonitor {
 					"bird house",
 					space.getName(),
 					entityName,
-					completedAt,
+					Instant.ofEpochSecond(spaceCompletionTime),
 					birdHouseNotify,
 					playerUsername,
-					startedAt,
+					Instant.ofEpochSecond(timestamp),
 					null,
 					birdHouseEntityId,
 					space.getVarp()));

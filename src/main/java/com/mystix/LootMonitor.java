@@ -31,7 +31,6 @@ import net.runelite.api.WorldView;
 import net.runelite.api.events.GameStateChanged;
 import net.runelite.client.callback.ClientThread;
 import net.runelite.client.config.ConfigManager;
-import net.runelite.client.eventbus.EventBus;
 import net.runelite.client.eventbus.Subscribe;
 import net.runelite.client.game.ItemManager;
 import net.runelite.client.game.ItemStack;
@@ -52,7 +51,6 @@ public class LootMonitor
 	private final Client client;
 	private final MystixConfig config;
 	private final MystixApiClient apiClient;
-	private final EventBus eventBus;
 	private final ScheduledExecutorService executorService;
 	private final ClientThread clientThread;
 	private final ConfigManager configManager;
@@ -77,7 +75,6 @@ public class LootMonitor
 		Client client,
 		MystixConfig config,
 		MystixApiClient apiClient,
-		EventBus eventBus,
 		ScheduledExecutorService executorService,
 		ClientThread clientThread,
 		ConfigManager configManager,
@@ -87,7 +84,6 @@ public class LootMonitor
 		this.client = client;
 		this.config = config;
 		this.apiClient = apiClient;
-		this.eventBus = eventBus;
 		this.executorService = executorService;
 		this.clientThread = clientThread;
 		this.configManager = configManager;
@@ -97,8 +93,6 @@ public class LootMonitor
 
 	public void start()
 	{
-		eventBus.register(this);
-
 		// Read or generate a persistent client ID (per-machine, not per RS profile).
 		clientId = configManager.getConfiguration("mystix", "clientId");
 		if (clientId == null || clientId.isEmpty())
@@ -106,16 +100,13 @@ public class LootMonitor
 			clientId = UUID.randomUUID().toString();
 			configManager.setConfiguration("mystix", "clientId", clientId);
 		}
-		log.debug("LootMonitor client ID: {}", clientId);
 
 		flushTask = executorService.scheduleAtFixedRate(
 			this::flushDrops, FLUSH_INTERVAL_SECONDS, FLUSH_INTERVAL_SECONDS, TimeUnit.SECONDS);
-		log.info("LootMonitor started");
 	}
 
 	public void stop()
 	{
-		eventBus.unregister(this);
 		if (flushTask != null)
 		{
 			flushTask.cancel(false);
@@ -126,7 +117,6 @@ public class LootMonitor
 		sessionKillCounts.clear();
 		recentNpcIds.clear();
 		lastSyncHash = null;
-		log.debug("LootMonitor stopped");
 	}
 
 	@Subscribe
@@ -242,7 +232,7 @@ public class LootMonitor
 
 		String droppedAt = DateTimeFormatter.ISO_INSTANT.format(Instant.now().atOffset(ZoneOffset.UTC));
 		LootDropPayload payload = new LootDropPayload(playerUsername, clientId, npcId, npcName, killCount, droppedAt, items);
-		log.info("Loot drop from {} (id={}, kc={}): {} items (queued)", npcName, npcId, killCount, items.size());
+		log.debug("Loot drop from {} (id={}, kc={}): {} items (queued)", npcName, npcId, killCount, items.size());
 
 		synchronized (pendingDrops)
 		{
@@ -266,7 +256,7 @@ public class LootMonitor
 			pendingDrops.clear();
 		}
 
-		log.info("Flushing {} loot drops to API", dropsToSend.size());
+		log.debug("Flushing {} loot drops to API", dropsToSend.size());
 		apiClient.sendLootDrops(dropsToSend);
 	}
 
@@ -319,7 +309,7 @@ public class LootMonitor
 		}
 
 		LootSyncPayload payload = new LootSyncPayload(playerUsername, clientId, lootRecords);
-		log.info("Syncing {} loot records for player: {}", lootRecords.size(), playerUsername);
+		log.debug("Syncing {} loot records for player: {}", lootRecords.size(), playerUsername);
 		apiClient.sendLootSync(payload);
 
 		lastSyncHash = currentHash;
