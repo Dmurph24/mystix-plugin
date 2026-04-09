@@ -103,15 +103,8 @@ public class CompostTracker
 
 	public void setCompostState(FarmingPatch fp, CompostState state)
 	{
-		log.debug("Storing compost state [{}] for patch [{}]", state, fp);
-		if (state == null)
-		{
-			configManager.unsetRSProfileConfiguration(TimeTrackingConfig.CONFIG_GROUP, configKey(fp));
-		}
-		else
-		{
-			configManager.setRSProfileConfiguration(TimeTrackingConfig.CONFIG_GROUP, configKey(fp), state);
-		}
+		// No-op: Mystix only reads compost state from the core Time Tracking plugin.
+		// Writing to the timetracking config group is left to RuneLite's own tracker.
 	}
 
 	public CompostState getCompostState(FarmingPatch fp)

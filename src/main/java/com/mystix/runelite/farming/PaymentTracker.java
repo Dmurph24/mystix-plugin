@@ -191,14 +191,8 @@ public class PaymentTracker
 
 	void setProtectedState(FarmingPatch fp, boolean state)
 	{
-		if (!state)
-		{
-			configManager.unsetRSProfileConfiguration(TimeTrackingConfig.CONFIG_GROUP, configKey(fp));
-		}
-		else
-		{
-			configManager.setRSProfileConfiguration(TimeTrackingConfig.CONFIG_GROUP, configKey(fp), state);
-		}
+		// No-op: Mystix only reads protection state from the core Time Tracking plugin.
+		// Writing to the timetracking config group is left to RuneLite's own tracker.
 	}
 
 	boolean getProtectedState(FarmingPatch fp)

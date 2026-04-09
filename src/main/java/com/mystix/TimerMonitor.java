@@ -12,8 +12,6 @@ import java.util.List;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
-import javax.inject.Inject;
-import javax.inject.Singleton;
 import net.runelite.api.events.GameStateChanged;
 import net.runelite.client.eventbus.Subscribe;
 import lombok.extern.slf4j.Slf4j;
@@ -24,13 +22,13 @@ import net.runelite.client.plugins.timetracking.TimeTrackingConfig;
 import com.mystix.runelite.farming.CropState;
 import com.mystix.runelite.farming.FarmingPatch;
 import com.mystix.runelite.farming.FarmingTracker;
+import com.mystix.runelite.farming.FarmingWorld;
 import com.mystix.runelite.farming.PatchPrediction;
 import com.mystix.runelite.farming.Produce;
 import com.mystix.runelite.hunter.BirdHouse;
 import com.mystix.runelite.hunter.BirdHouseSpace;
 
 @Slf4j
-@Singleton
 public class TimerMonitor {
 	private static final int INITIAL_DELAY_SECONDS = 10;
 	private static final int SYNC_INTERVAL_SECONDS = 45;
@@ -45,38 +43,32 @@ public class TimerMonitor {
 	private final MystixApiClient apiClient;
 	private final ConfigManager configManager;
 	private final ScheduledExecutorService executorService;
+	private final FarmingTracker farmingTracker;
+	private final FarmingWorld farmingWorld;
 
-	private FarmingTracker farmingTracker;
-	private com.mystix.runelite.farming.FarmingWorld farmingWorld;
 	private ScheduledFuture<?> scheduledFuture;
 	private String lastSentSnapshot;
 	private volatile Instant tearsOfGuthixNextReset = null;
 	private GameState previousGameState = GameState.UNKNOWN;
 
-	@Inject
 	public TimerMonitor(
 			Client client,
 			MystixConfig config,
 			MystixApiClient apiClient,
 			ConfigManager configManager,
-			ScheduledExecutorService executorService) {
+			ScheduledExecutorService executorService,
+			FarmingTracker farmingTracker,
+			FarmingWorld farmingWorld) {
 		this.client = client;
 		this.config = config;
 		this.apiClient = apiClient;
 		this.configManager = configManager;
 		this.executorService = executorService;
-	}
-
-	public void initialize(FarmingTracker farmingTracker, com.mystix.runelite.farming.FarmingWorld farmingWorld) {
 		this.farmingTracker = farmingTracker;
 		this.farmingWorld = farmingWorld;
 	}
 
 	public void start() {
-		if (farmingTracker == null) {
-			log.warn("TimerMonitor not initialized; skipping start");
-			return;
-		}
 		if (scheduledFuture != null) {
 			return;
 		}
