@@ -348,8 +348,8 @@ public class LootMonitor
 		}
 		catch (NoSuchAlgorithmException e)
 		{
-			// MD5 is guaranteed to be available in all Java implementations
-			throw new RuntimeException(e);
+			log.debug("MD5 not available, skipping hash-based dedup", e);
+			return UUID.randomUUID().toString();
 		}
 	}
 

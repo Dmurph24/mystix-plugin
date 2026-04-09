@@ -1,6 +1,8 @@
 package com.mystix;
 
 import com.google.inject.Provides;
+import com.mystix.api.MystixApiClient;
+import java.util.concurrent.ScheduledExecutorService;
 import javax.inject.Inject;
 import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.ChatMessageType;
@@ -30,7 +32,6 @@ public class MystixPlugin extends Plugin {
 	@Inject
 	private MystixConfig config;
 
-	@Inject
 	private TimerMonitor timerMonitor;
 
 	@Inject
@@ -63,6 +64,12 @@ public class MystixPlugin extends Plugin {
 	@Inject
 	private ItemManager itemManager;
 
+	@Inject
+	private MystixApiClient apiClient;
+
+	@Inject
+	private ScheduledExecutorService executorService;
+
 	@Override
 	protected void startUp() throws Exception {
 		log.debug("Mystix started");
@@ -81,7 +88,9 @@ public class MystixPlugin extends Plugin {
 				compostTracker,
 				paymentTracker);
 
-		timerMonitor.initialize(farmingTracker, farmingWorld);
+		timerMonitor = new TimerMonitor(
+				client, config, apiClient, configManager, executorService,
+				farmingTracker, farmingWorld);
 
 		eventBus.register(this);
 		eventBus.register(timerMonitor);
