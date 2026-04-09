@@ -348,7 +348,7 @@ public class LootMonitor
 		}
 		catch (NoSuchAlgorithmException e)
 		{
-			log.warn("MD5 not available, skipping hash-based dedup", e);
+			log.debug("MD5 not available, skipping hash-based dedup", e);
 			return UUID.randomUUID().toString();
 		}
 	}
