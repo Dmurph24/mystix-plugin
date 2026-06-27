@@ -103,6 +103,7 @@ public class MystixPlugin extends Plugin {
 
 		timerMonitor.start();
 		lootMonitor.start();
+		playerSkillsMonitor.start();
 	}
 
 	@Override
