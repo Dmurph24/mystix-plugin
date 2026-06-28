@@ -129,6 +129,20 @@ public class RoadmapManager {
 	}
 
 	/**
+	 * Deletes a goal from the backend and caches the re-rendered roadmap (so the
+	 * overlay's next goal updates too). Callback runs on the OkHttp thread.
+	 */
+	public void deleteGoal(int collectionId, int goalId,
+			MystixApiClient.RoadmapCallback<Roadmap> callback) {
+		String player = getPlayerUsername();
+		if (player == null) {
+			callback.onError("Log in to update your roadmap");
+			return;
+		}
+		apiClient.deleteRoadmapGoal(collectionId, goalId, player, cacheThen(collectionId, callback));
+	}
+
+	/**
 	 * Refreshes the cached selected roadmap silently (no UI callback). Used by the
 	 * overlay path on login / periodically so it has fresh data even when the
 	 * panel is closed.

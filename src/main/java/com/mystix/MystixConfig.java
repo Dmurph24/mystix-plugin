@@ -31,8 +31,8 @@ public interface MystixConfig extends Config {
 		return true;
 	}
 
-	@ConfigItem(keyName = "showNextGoal", name = "Show next goal overlay", description = "Show the next uncompleted goal from your selected roadmap as an overlay in the game window.", position = 6)
+	@ConfigItem(keyName = "showNextGoal", name = "Show current goal overlay", description = "Show your current (next uncompleted) goal from the selected roadmap as an overlay in the game window.", position = 6)
 	default boolean showNextGoal() {
-		return false;
+		return true;
 	}
 }

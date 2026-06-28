@@ -85,7 +85,9 @@ public class MystixApiClient
 
 	public void sendPlayerSkillsSync(PlayerSkillsSyncPayload payload)
 	{
-		postAsync(SKILLS_ENDPOINT, payload.toJson(gson), "skills", false, true,
+		// Never dedupe skills: the backend skills endpoint also triggers roadmap
+		// rechecks and WikiSync, so it must run even when the payload is unchanged.
+		postAsync(SKILLS_ENDPOINT, payload.toJson(gson), "skills", false, false,
 			() -> log.debug("Mystix player skills sync successful for player: {}", payload.getPlayer()));
 	}
 
@@ -196,6 +198,18 @@ public class MystixApiClient
 		Map<String, Object> body = new LinkedHashMap<>();
 		body.put("player", playerUsername);
 		postForResult(url, gson.toJson(body), "roadmap-goal-complete", Roadmap.class, callback);
+	}
+
+	/**
+	 * Deletes a single goal from a roadmap and returns the re-rendered roadmap.
+	 */
+	public void deleteRoadmapGoal(int collectionId, int goalId, String playerUsername,
+		RoadmapCallback<Roadmap> callback)
+	{
+		String url = ROADMAPS_ENDPOINT + collectionId + "/goals/" + goalId + "/delete/";
+		Map<String, Object> body = new LinkedHashMap<>();
+		body.put("player", playerUsername);
+		postForResult(url, gson.toJson(body), "roadmap-goal-delete", Roadmap.class, callback);
 	}
 
 	private <T> void getAsync(String endpoint, String label, Class<T> type, RoadmapCallback<T> callback)

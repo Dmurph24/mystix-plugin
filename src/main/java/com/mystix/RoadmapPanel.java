@@ -10,7 +10,12 @@ import java.awt.Color;
 import java.awt.Component;
 import java.awt.Dimension;
 import java.awt.Insets;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import javax.swing.BorderFactory;
@@ -19,6 +24,7 @@ import javax.swing.BoxLayout;
 import javax.swing.DefaultComboBoxModel;
 import javax.swing.JButton;
 import javax.swing.JComboBox;
+import javax.swing.JComponent;
 import javax.swing.JLabel;
 import javax.swing.JOptionPane;
 import javax.swing.JPanel;
@@ -46,17 +52,20 @@ public class RoadmapPanel extends PluginPanel {
 	private static final int RECOMPUTE_DELAY_SECONDS = 10;
 
 	private static final Color COMPLETE_COLOR = new Color(0x4C, 0xAF, 0x50);
+	private static final Color DELETE_COLOR = new Color(0xC0, 0x4A, 0x4A);
 
 	/** Pixel width the goal-name HTML wraps at, so long names never truncate. */
 	private static final int NAME_WRAP_WIDTH = 165;
+	/** Left indent (px) added per prerequisite-depth level, mirroring the app. */
+	private static final int INDENT_PER_DEPTH = 14;
 
 	private final RoadmapManager roadmapManager;
 	private final ScheduledExecutorService executor;
 	private final Runnable forceSyncAll;
 
 	private final JComboBox<RoadmapSummary> roadmapSelector = new JComboBox<>();
-	private final JButton syncButton = new JButton("Sync & refresh");
-	private final JButton reloadButton = new JButton("Reload roadmaps");
+	private final JButton syncButton = new JButton("Check for completions");
+	private final JButton reloadButton = new JButton("Load Roadmaps from App");
 	private final JLabel statusLabel = new JLabel();
 	private final JPanel goalsPanel = new JPanel();
 
@@ -285,8 +294,21 @@ public class RoadmapPanel extends PluginPanel {
 			empty.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
 			goalsPanel.add(empty);
 		} else {
-			for (RoadmapGoal goal : goals) {
-				goalsPanel.add(buildGoalRow(goal));
+			Map<Integer, RoadmapGoal> byId = new HashMap<>();
+			for (RoadmapGoal g : goals) {
+				byId.put(g.getId(), g);
+			}
+			// Order so each goal follows its prerequisites, then indent by depth
+			// (the longest prerequisite chain), mirroring the app's tree layout.
+			List<RoadmapGoal> ordered = new ArrayList<>();
+			Set<Integer> visited = new HashSet<>();
+			for (RoadmapGoal g : goals) {
+				orderByPrereqs(g, byId, visited, ordered, new HashSet<>());
+			}
+			Map<Integer, Integer> depthMemo = new HashMap<>();
+			for (RoadmapGoal goal : ordered) {
+				int depth = prereqDepth(goal, byId, depthMemo, new HashSet<>());
+				goalsPanel.add(indentRow(buildGoalRow(goal, depth), depth));
 				goalsPanel.add(Box.createVerticalStrut(4));
 			}
 		}
@@ -294,14 +316,71 @@ public class RoadmapPanel extends PluginPanel {
 		goalsPanel.repaint();
 	}
 
-	private JPanel buildGoalRow(RoadmapGoal goal) {
+	/** Depth-first order placing each goal after all of its prerequisites. */
+	private void orderByPrereqs(RoadmapGoal goal, Map<Integer, RoadmapGoal> byId,
+			Set<Integer> visited, List<RoadmapGoal> ordered, Set<Integer> inProgress) {
+		if (visited.contains(goal.getId()) || !inProgress.add(goal.getId())) {
+			return; // already placed, or a cycle — bail safely
+		}
+		for (Integer depId : goal.getDependencyIds()) {
+			RoadmapGoal dep = byId.get(depId);
+			if (dep != null) {
+				orderByPrereqs(dep, byId, visited, ordered, inProgress);
+			}
+		}
+		inProgress.remove(goal.getId());
+		if (visited.add(goal.getId())) {
+			ordered.add(goal);
+		}
+	}
+
+	/** Longest prerequisite chain length (0 for a goal with no prerequisites). */
+	private int prereqDepth(RoadmapGoal goal, Map<Integer, RoadmapGoal> byId,
+			Map<Integer, Integer> memo, Set<Integer> inProgress) {
+		Integer cached = memo.get(goal.getId());
+		if (cached != null) {
+			return cached;
+		}
+		if (!inProgress.add(goal.getId())) {
+			return 0; // cycle guard
+		}
+		int depth = 0;
+		for (Integer depId : goal.getDependencyIds()) {
+			RoadmapGoal dep = byId.get(depId);
+			if (dep != null) {
+				depth = Math.max(depth, prereqDepth(dep, byId, memo, inProgress) + 1);
+			}
+		}
+		inProgress.remove(goal.getId());
+		memo.put(goal.getId(), depth);
+		return depth;
+	}
+
+	/** Wraps a card in a left-indented container so deeper goals shift right. */
+	private JComponent indentRow(JPanel card, int depth) {
+		if (depth <= 0) {
+			return card;
+		}
+		JPanel wrapper = new JPanel();
+		wrapper.setLayout(new BoxLayout(wrapper, BoxLayout.X_AXIS));
+		wrapper.setBackground(ColorScheme.DARK_GRAY_COLOR);
+		wrapper.setAlignmentX(Component.LEFT_ALIGNMENT);
+		wrapper.add(Box.createHorizontalStrut(depth * INDENT_PER_DEPTH));
+		wrapper.add(card);
+		wrapper.setMaximumSize(new Dimension(Integer.MAX_VALUE, card.getMaximumSize().height));
+		return wrapper;
+	}
+
+	private JPanel buildGoalRow(RoadmapGoal goal, int depth) {
 		JPanel row = new JPanel();
 		row.setLayout(new BoxLayout(row, BoxLayout.Y_AXIS));
 		row.setBorder(BorderFactory.createEmptyBorder(6, 8, 6, 8));
 		row.setBackground(ColorScheme.DARKER_GRAY_COLOR);
 
-		// Width-constrained HTML so the full goal name wraps instead of truncating.
-		JLabel name = new JLabel(wrapGoalName(goalName(goal)));
+		// Width-constrained HTML so the full goal name wraps instead of truncating;
+		// narrow the wrap width to match the card shrinking as it indents.
+		int wrapWidth = Math.max(80, NAME_WRAP_WIDTH - depth * INDENT_PER_DEPTH);
+		JLabel name = new JLabel(wrapGoalName(goalName(goal), wrapWidth));
 		name.setForeground(goal.isComplete() ? COMPLETE_COLOR : Color.WHITE);
 		name.setFont(FontManager.getRunescapeSmallFont());
 		name.setAlignmentX(Component.LEFT_ALIGNMENT);
@@ -314,15 +393,31 @@ public class RoadmapPanel extends PluginPanel {
 			done.setAlignmentX(Component.LEFT_ALIGNMENT);
 			row.add(Box.createVerticalStrut(4));
 			row.add(done);
-		} else {
+		}
+
+		// Action row: "Mark complete" (incomplete goals only) + "Delete".
+		JPanel actions = new JPanel();
+		actions.setLayout(new BoxLayout(actions, BoxLayout.X_AXIS));
+		actions.setBackground(ColorScheme.DARKER_GRAY_COLOR);
+		actions.setAlignmentX(Component.LEFT_ALIGNMENT);
+		if (!goal.isComplete()) {
 			JButton markComplete = new JButton("Mark complete");
 			markComplete.setFont(FontManager.getRunescapeSmallFont());
 			markComplete.setMargin(new Insets(2, 6, 2, 6));
-			markComplete.setAlignmentX(Component.LEFT_ALIGNMENT);
 			markComplete.addActionListener(e -> confirmMarkComplete(goal));
-			row.add(Box.createVerticalStrut(6));
-			row.add(markComplete);
+			actions.add(markComplete);
+			actions.add(Box.createHorizontalStrut(6));
 		}
+		JButton delete = new JButton("Delete");
+		delete.setFont(FontManager.getRunescapeSmallFont());
+		delete.setMargin(new Insets(2, 6, 2, 6));
+		delete.setForeground(DELETE_COLOR);
+		delete.setToolTipText("Remove this goal from the roadmap");
+		delete.addActionListener(e -> confirmDelete(goal));
+		actions.add(delete);
+		actions.add(Box.createHorizontalGlue());
+		row.add(Box.createVerticalStrut(6));
+		row.add(actions);
 
 		// Lock the height only AFTER the children are added, otherwise BoxLayout
 		// clamps the row to the empty-panel height and the content gets clipped.
@@ -362,17 +457,49 @@ public class RoadmapPanel extends PluginPanel {
 				});
 	}
 
+	/** Confirms, then deletes a goal from the roadmap and re-renders. */
+	private void confirmDelete(RoadmapGoal goal) {
+		RoadmapSummary selected = (RoadmapSummary) roadmapSelector.getSelectedItem();
+		if (selected == null) {
+			return;
+		}
+		int choice = JOptionPane.showConfirmDialog(
+				this,
+				"Delete \"" + goalName(goal) + "\" from this roadmap?",
+				"Delete goal",
+				JOptionPane.YES_NO_OPTION);
+		if (choice != JOptionPane.YES_OPTION) {
+			return;
+		}
+		setStatus("Deleting...");
+		roadmapManager.deleteGoal(selected.getCollectionId(), goal.getId(),
+				new MystixApiClient.RoadmapCallback<Roadmap>() {
+					@Override
+					public void onSuccess(Roadmap result) {
+						SwingUtilities.invokeLater(() -> {
+							setStatus("");
+							renderGoals(result);
+						});
+					}
+
+					@Override
+					public void onError(String message) {
+						SwingUtilities.invokeLater(() -> setStatus(message));
+					}
+				});
+	}
+
 	private static String goalName(RoadmapGoal goal) {
 		return goal.getName() == null ? "Goal" : goal.getName();
 	}
 
 	/** Wraps a goal name in width-constrained HTML so long names don't truncate. */
-	private static String wrapGoalName(String name) {
+	private static String wrapGoalName(String name, int width) {
 		String escaped = name
 				.replace("&", "&amp;")
 				.replace("<", "&lt;")
 				.replace(">", "&gt;");
-		return "<html><body style='width:" + NAME_WRAP_WIDTH + "px'>" + escaped + "</body></html>";
+		return "<html><body style='width:" + width + "px'>" + escaped + "</body></html>";
 	}
 
 	private void clearGoals() {
