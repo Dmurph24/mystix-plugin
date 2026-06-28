@@ -48,15 +48,24 @@ public class RoadmapGoal {
 		return dependencyIds == null ? Collections.emptyList() : dependencyIds;
 	}
 
-	/** OSRS item id for an icon, when this goal targets an item (else null). */
+	/** OSRS item id for an icon, when this goal targets an item (else null).
+	 *
+	 * <p>Item/drop/clog goals expose it as {@code item_id}; farming goals carry it
+	 * as {@code osrs_item_id} in their params, so fall back to that. */
 	public Integer getItemId() {
-		return meta == null ? null : meta.itemId;
+		if (meta == null) {
+			return null;
+		}
+		return meta.itemId != null ? meta.itemId : meta.osrsItemId;
 	}
 
 	/** Catalog metadata block; only the fields the plugin needs are mapped. */
 	private static class Meta {
 		@SerializedName("item_id")
 		private Integer itemId;
+
+		@SerializedName("osrs_item_id")
+		private Integer osrsItemId;
 	}
 
 	public String getGoalType() {
