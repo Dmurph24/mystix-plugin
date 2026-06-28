@@ -62,10 +62,16 @@ final class ItemCollector {
 		}
 	}
 
-	/** Converts an item quantity map into a list of BankItem payload objects. */
+	/**
+	 * Converts an item quantity map into a list of BankItem payload objects, sorted by item ID.
+	 * Sorting makes the payload canonical so identical contents always serialize identically,
+	 * regardless of container slot order — a reorder alone won't look like a change to dedup.
+	 */
 	static List<BankSyncPayload.BankItem> toBankItemList(Map<Integer, Integer> itemQuantities) {
 		List<BankSyncPayload.BankItem> items = new ArrayList<>();
-		itemQuantities.forEach((id, qty) -> items.add(new BankSyncPayload.BankItem(id, qty)));
+		itemQuantities.entrySet().stream()
+				.sorted(Map.Entry.comparingByKey())
+				.forEach(e -> items.add(new BankSyncPayload.BankItem(e.getKey(), e.getValue())));
 		return items;
 	}
 }
