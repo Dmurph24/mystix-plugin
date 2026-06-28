@@ -1,8 +1,10 @@
 package com.mystix;
 
+import com.mystix.model.Roadmap;
 import com.mystix.model.RoadmapGoal;
 import java.awt.Color;
 import java.awt.Dimension;
+import java.awt.FontMetrics;
 import java.awt.Graphics2D;
 import javax.inject.Inject;
 import net.runelite.client.ui.overlay.OverlayPanel;
@@ -11,16 +13,20 @@ import net.runelite.client.ui.overlay.components.LineComponent;
 import net.runelite.client.ui.overlay.components.TitleComponent;
 
 /**
- * Game-window overlay showing the next uncompleted goal of the selected roadmap.
+ * Game-window overlay showing the current goal of the selected roadmap.
  *
  * <p>Gated by {@link MystixConfig#showNextGoal()}. Reads the cached roadmap from
- * {@link RoadmapManager} (no network on the render thread) and renders the goal
- * name + progress. Renders nothing when disabled, no app key, or no incomplete
- * goal is available.
+ * {@link RoadmapManager} (no network on the render thread) and renders a
+ * "[roadmap name] - Current Goal" header above the goal name. Renders nothing
+ * when disabled, no app key, or no incomplete goal is available.
  */
 public class NextGoalOverlay extends OverlayPanel {
 	private static final Color TITLE_COLOR = new Color(0xF2, 0x8C, 0x28); // Mystix orange
-	private static final int PREFERRED_WIDTH = 160;
+
+	/** Horizontal padding added to the widest line so text never touches the edge. */
+	private static final int WIDTH_PADDING = 14;
+	/** Floor so a very short goal still renders as a panel, not a sliver. */
+	private static final int MIN_WIDTH = 120;
 
 	private final MystixConfig config;
 	private final RoadmapManager roadmapManager;
@@ -38,31 +44,39 @@ public class NextGoalOverlay extends OverlayPanel {
 			return null;
 		}
 
-		RoadmapGoal goal = roadmapManager.getNextGoal();
+		Roadmap roadmap = roadmapManager.getCurrentRoadmap();
+		if (roadmap == null) {
+			return null;
+		}
+		RoadmapGoal goal = roadmap.firstIncompleteGoal();
 		if (goal == null || goal.getName() == null) {
 			return null;
 		}
 
+		String title = roadmap.getTitle();
+		String header = (title == null || title.isEmpty())
+				? "Current Goal"
+				: title + " - Current Goal";
+		String goalName = goal.getName();
+
 		panelComponent.getChildren().clear();
-		panelComponent.setPreferredSize(new Dimension(PREFERRED_WIDTH, 0));
+
+		// Size the panel to the widest line. RuneLite's TitleComponent centres its
+		// text within the panel's preferred width and doesn't wrap, so a fixed
+		// width makes longer roadmap/goal names spill past the background box.
+		FontMetrics metrics = graphics.getFontMetrics();
+		int contentWidth = Math.max(metrics.stringWidth(header), metrics.stringWidth(goalName));
+		panelComponent.setPreferredSize(
+				new Dimension(Math.max(MIN_WIDTH, contentWidth + WIDTH_PADDING), 0));
 
 		panelComponent.getChildren().add(TitleComponent.builder()
-				.text("Next Goal")
+				.text(header)
 				.color(TITLE_COLOR)
 				.build());
 
 		panelComponent.getChildren().add(LineComponent.builder()
-				.left(goal.getName())
+				.left(goalName)
 				.build());
-
-		String progress = goal.progressLabel();
-		if (!progress.isEmpty()) {
-			panelComponent.getChildren().add(LineComponent.builder()
-					.left("Progress:")
-					.right(progress)
-					.rightColor(Color.GREEN)
-					.build());
-		}
 
 		return super.render(graphics);
 	}

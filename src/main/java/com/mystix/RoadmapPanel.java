@@ -9,7 +9,7 @@ import java.awt.BorderLayout;
 import java.awt.Color;
 import java.awt.Component;
 import java.awt.Dimension;
-import java.awt.GridLayout;
+import java.awt.Insets;
 import java.util.List;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
@@ -20,6 +20,7 @@ import javax.swing.DefaultComboBoxModel;
 import javax.swing.JButton;
 import javax.swing.JComboBox;
 import javax.swing.JLabel;
+import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.SwingUtilities;
 import lombok.extern.slf4j.Slf4j;
@@ -39,12 +40,15 @@ import net.runelite.client.ui.PluginPanel;
 public class RoadmapPanel extends PluginPanel {
 	/**
 	 * Delay between firing the data syncs and asking the backend to recompute, so
-	 * the freshly synced data has a chance to land first.
+	 * the freshly synced data has a chance to be ingested and committed first.
+	 * Matches the ~10s wait the mobile app's refresh uses.
 	 */
-	private static final int RECOMPUTE_DELAY_SECONDS = 4;
+	private static final int RECOMPUTE_DELAY_SECONDS = 10;
 
 	private static final Color COMPLETE_COLOR = new Color(0x4C, 0xAF, 0x50);
-	private static final Color PROGRESS_COLOR = new Color(0xF2, 0x8C, 0x28);
+
+	/** Pixel width the goal-name HTML wraps at, so long names never truncate. */
+	private static final int NAME_WRAP_WIDTH = 165;
 
 	private final RoadmapManager roadmapManager;
 	private final ScheduledExecutorService executor;
@@ -291,40 +295,84 @@ public class RoadmapPanel extends PluginPanel {
 	}
 
 	private JPanel buildGoalRow(RoadmapGoal goal) {
-		JPanel row = new JPanel(new GridLayout(0, 1));
+		JPanel row = new JPanel();
+		row.setLayout(new BoxLayout(row, BoxLayout.Y_AXIS));
 		row.setBorder(BorderFactory.createEmptyBorder(6, 8, 6, 8));
 		row.setBackground(ColorScheme.DARKER_GRAY_COLOR);
-		row.setMaximumSize(new Dimension(Integer.MAX_VALUE, row.getPreferredSize().height));
 
-		JLabel name = new JLabel(goalName(goal));
+		// Width-constrained HTML so the full goal name wraps instead of truncating.
+		JLabel name = new JLabel(wrapGoalName(goalName(goal)));
 		name.setForeground(goal.isComplete() ? COMPLETE_COLOR : Color.WHITE);
 		name.setFont(FontManager.getRunescapeSmallFont());
+		name.setAlignmentX(Component.LEFT_ALIGNMENT);
 		row.add(name);
 
-		String detail;
-		Color detailColor;
 		if (goal.isComplete()) {
-			detail = "Completed";
-			detailColor = COMPLETE_COLOR;
-		} else if (!goal.progressLabel().isEmpty()) {
-			detail = "Progress: " + goal.progressLabel();
-			detailColor = PROGRESS_COLOR;
+			JLabel done = new JLabel("Completed");
+			done.setForeground(COMPLETE_COLOR);
+			done.setFont(FontManager.getRunescapeSmallFont());
+			done.setAlignmentX(Component.LEFT_ALIGNMENT);
+			row.add(Box.createVerticalStrut(4));
+			row.add(done);
 		} else {
-			detail = "In progress";
-			detailColor = ColorScheme.LIGHT_GRAY_COLOR;
+			JButton markComplete = new JButton("Mark complete");
+			markComplete.setFont(FontManager.getRunescapeSmallFont());
+			markComplete.setMargin(new Insets(2, 6, 2, 6));
+			markComplete.setAlignmentX(Component.LEFT_ALIGNMENT);
+			markComplete.addActionListener(e -> confirmMarkComplete(goal));
+			row.add(Box.createVerticalStrut(6));
+			row.add(markComplete);
 		}
-		JLabel detailLabel = new JLabel(detail);
-		detailLabel.setForeground(detailColor);
-		detailLabel.setFont(FontManager.getRunescapeSmallFont());
-		row.add(detailLabel);
 
+		// Lock the height only AFTER the children are added, otherwise BoxLayout
+		// clamps the row to the empty-panel height and the content gets clipped.
+		row.setMaximumSize(new Dimension(Integer.MAX_VALUE, row.getPreferredSize().height));
 		return row;
 	}
 
+	/** Confirms, then asks the backend to mark a goal complete and re-renders. */
+	private void confirmMarkComplete(RoadmapGoal goal) {
+		RoadmapSummary selected = (RoadmapSummary) roadmapSelector.getSelectedItem();
+		if (selected == null) {
+			return;
+		}
+		int choice = JOptionPane.showConfirmDialog(
+				this,
+				"Mark \"" + goalName(goal) + "\" as complete?",
+				"Mark goal complete",
+				JOptionPane.YES_NO_OPTION);
+		if (choice != JOptionPane.YES_OPTION) {
+			return;
+		}
+		setStatus("Marking complete...");
+		roadmapManager.completeGoal(selected.getCollectionId(), goal.getId(),
+				new MystixApiClient.RoadmapCallback<Roadmap>() {
+					@Override
+					public void onSuccess(Roadmap result) {
+						SwingUtilities.invokeLater(() -> {
+							setStatus("");
+							renderGoals(result);
+						});
+					}
+
+					@Override
+					public void onError(String message) {
+						SwingUtilities.invokeLater(() -> setStatus(message));
+					}
+				});
+	}
+
 	private static String goalName(RoadmapGoal goal) {
-		String prefix = goal.isComplete() ? "✔ " : "• ";
-		String name = goal.getName() == null ? "Goal" : goal.getName();
-		return prefix + name;
+		return goal.getName() == null ? "Goal" : goal.getName();
+	}
+
+	/** Wraps a goal name in width-constrained HTML so long names don't truncate. */
+	private static String wrapGoalName(String name) {
+		String escaped = name
+				.replace("&", "&amp;")
+				.replace("<", "&lt;")
+				.replace(">", "&gt;");
+		return "<html><body style='width:" + NAME_WRAP_WIDTH + "px'>" + escaped + "</body></html>";
 	}
 
 	private void clearGoals() {

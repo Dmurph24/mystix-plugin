@@ -180,6 +180,18 @@ public class MystixApiClient
 		postForResult(url, gson.toJson(body), "roadmap-recompute", Roadmap.class, callback);
 	}
 
+	/**
+	 * Manually marks a single goal complete and returns the re-rendered roadmap.
+	 */
+	public void completeRoadmapGoal(int collectionId, int goalId, String playerUsername,
+		RoadmapCallback<Roadmap> callback)
+	{
+		String url = ROADMAPS_ENDPOINT + collectionId + "/goals/" + goalId + "/complete/";
+		Map<String, Object> body = new LinkedHashMap<>();
+		body.put("player", playerUsername);
+		postForResult(url, gson.toJson(body), "roadmap-goal-complete", Roadmap.class, callback);
+	}
+
 	private <T> void getAsync(String endpoint, String label, Class<T> type, RoadmapCallback<T> callback)
 	{
 		if (!SyncGuard.hasAppKey(config))

@@ -2,7 +2,6 @@ package com.mystix;
 
 import com.mystix.api.MystixApiClient;
 import com.mystix.model.Roadmap;
-import com.mystix.model.RoadmapGoal;
 import com.mystix.model.RoadmapList;
 import java.util.function.Consumer;
 import javax.inject.Inject;
@@ -67,12 +66,6 @@ public class RoadmapManager {
 		this.currentRoadmap = null;
 	}
 
-	/** The next uncompleted goal of the selected roadmap, or null. */
-	public RoadmapGoal getNextGoal() {
-		Roadmap roadmap = currentRoadmap;
-		return roadmap == null ? null : roadmap.firstIncompleteGoal();
-	}
-
 	public Integer getSelectedRoadmapId() {
 		return configManager.getConfiguration(
 				CONFIG_GROUP, SELECTED_ROADMAP_KEY, Integer.class);
@@ -118,6 +111,21 @@ public class RoadmapManager {
 			return;
 		}
 		apiClient.recomputeRoadmap(collectionId, player, cacheThen(collectionId, callback));
+	}
+
+	/**
+	 * Manually marks a goal complete on the backend and caches the re-rendered
+	 * roadmap (so the overlay's next goal updates too). The callback runs on the
+	 * OkHttp thread; Swing callers marshal back to the EDT themselves.
+	 */
+	public void completeGoal(int collectionId, int goalId,
+			MystixApiClient.RoadmapCallback<Roadmap> callback) {
+		String player = getPlayerUsername();
+		if (player == null) {
+			callback.onError("Log in to update your roadmap");
+			return;
+		}
+		apiClient.completeRoadmapGoal(collectionId, goalId, player, cacheThen(collectionId, callback));
 	}
 
 	/**

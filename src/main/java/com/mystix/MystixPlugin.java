@@ -5,6 +5,7 @@ import com.mystix.api.MystixApiClient;
 import java.awt.image.BufferedImage;
 import java.util.concurrent.ScheduledExecutorService;
 import javax.inject.Inject;
+import javax.swing.SwingUtilities;
 import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.ChatMessageType;
 import net.runelite.api.Client;
@@ -187,9 +188,18 @@ public class MystixPlugin extends Plugin {
 	@Subscribe
 	public void onGameStateChanged(GameStateChanged event) {
 		if (event.getGameState() == GameState.LOGGED_IN) {
-			// Give the data syncs a moment, then warm the overlay's roadmap cache.
-			executorService.schedule(
-					roadmapManager::refreshSelectedQuietly, 8, java.util.concurrent.TimeUnit.SECONDS);
+			// Give the username/data a moment to settle after login, then load the
+			// roadmaps so the panel populates without a manual "Reload". When the
+			// panel is open its load also warms the overlay cache; when it's closed
+			// we just warm the cache directly for the overlay.
+			executorService.schedule(() -> {
+				RoadmapPanel panel = roadmapPanel;
+				if (panel != null) {
+					SwingUtilities.invokeLater(panel::loadRoadmaps);
+				} else {
+					roadmapManager.refreshSelectedQuietly();
+				}
+			}, 8, java.util.concurrent.TimeUnit.SECONDS);
 		}
 	}
 
