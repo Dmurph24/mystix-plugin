@@ -59,6 +59,12 @@ public class RoadmapGoal {
 		return meta.itemId != null ? meta.itemId : meta.osrsItemId;
 	}
 
+	/** Skill name (e.g. "Slayer") for a skill goal, used to pick its icon; null
+	 * otherwise. Only skill-level / skill-xp goals carry it. */
+	public String getSkillName() {
+		return meta == null ? null : meta.skill;
+	}
+
 	/** Catalog metadata block; only the fields the plugin needs are mapped. */
 	private static class Meta {
 		@SerializedName("item_id")
@@ -66,6 +72,9 @@ public class RoadmapGoal {
 
 		@SerializedName("osrs_item_id")
 		private Integer osrsItemId;
+
+		@SerializedName("skill")
+		private String skill;
 	}
 
 	public String getGoalType() {

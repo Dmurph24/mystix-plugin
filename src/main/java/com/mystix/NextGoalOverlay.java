@@ -8,8 +8,11 @@ import java.awt.FontMetrics;
 import java.awt.Graphics2D;
 import java.awt.Point;
 import java.awt.image.BufferedImage;
+import java.util.Locale;
 import javax.inject.Inject;
+import net.runelite.api.Skill;
 import net.runelite.client.game.ItemManager;
+import net.runelite.client.game.SkillIconManager;
 import net.runelite.client.ui.overlay.OverlayPanel;
 import net.runelite.client.ui.overlay.OverlayPosition;
 import net.runelite.client.ui.overlay.components.ComponentOrientation;
@@ -40,16 +43,20 @@ public class NextGoalOverlay extends OverlayPanel {
 	private final MystixConfig config;
 	private final RoadmapManager roadmapManager;
 	private final ItemManager itemManager;
+	private final SkillIconManager skillIconManager;
 
-	// Cache the last item icon so we don't re-fetch every render frame.
-	private int cachedItemId = -1;
+	// Cache the last icon (keyed by "item:<id>" / "skill:<name>") so we don't
+	// re-fetch every render frame.
+	private String cachedIconKey;
 	private BufferedImage cachedIcon;
 
 	@Inject
-	public NextGoalOverlay(MystixConfig config, RoadmapManager roadmapManager, ItemManager itemManager) {
+	public NextGoalOverlay(MystixConfig config, RoadmapManager roadmapManager,
+			ItemManager itemManager, SkillIconManager skillIconManager) {
 		this.config = config;
 		this.roadmapManager = roadmapManager;
 		this.itemManager = itemManager;
+		this.skillIconManager = skillIconManager;
 		setPosition(OverlayPosition.TOP_LEFT);
 	}
 
@@ -107,16 +114,38 @@ public class NextGoalOverlay extends OverlayPanel {
 		return super.render(graphics);
 	}
 
-	/** The goal's item sprite, or null when the goal doesn't target an item. */
+	/** The goal's icon: an item sprite, a skill icon, or null when neither. */
 	private BufferedImage iconFor(RoadmapGoal goal) {
 		Integer itemId = goal.getItemId();
-		if (itemId == null) {
-			return null;
+		if (itemId != null) {
+			return cached("item:" + itemId, () -> itemManager.getImage(itemId));
 		}
-		if (itemId != cachedItemId) {
-			cachedItemId = itemId;
-			cachedIcon = itemManager.getImage(itemId);
+		Skill skill = parseSkill(goal.getSkillName());
+		if (skill != null) {
+			return cached("skill:" + skill.name(), () -> skillIconManager.getSkillImage(skill));
+		}
+		return null;
+	}
+
+	/** Memoise the last icon so we don't re-fetch it every render frame. */
+	private BufferedImage cached(String key, java.util.function.Supplier<BufferedImage> loader) {
+		if (!key.equals(cachedIconKey)) {
+			cachedIconKey = key;
+			cachedIcon = loader.get();
 		}
 		return cachedIcon;
+	}
+
+	/** The RuneLite {@link Skill} for a goal's skill name, or null if unknown
+	 * (e.g. Sailing, which RuneLite doesn't have an icon for yet). */
+	private static Skill parseSkill(String name) {
+		if (name == null) {
+			return null;
+		}
+		try {
+			return Skill.valueOf(name.toUpperCase(Locale.ROOT));
+		} catch (IllegalArgumentException e) {
+			return null;
+		}
 	}
 }
