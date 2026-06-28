@@ -137,4 +137,35 @@ public class MystixApiClientTest {
 		});
 		assertEquals("No Mystix App Key configured", error.get());
 	}
+
+	@Test
+	public void testIsDuplicateReturnsFalseWhenPreviousNull() {
+		/* First-ever send for a syncType always goes out. */
+		assertFalse(MystixApiClient.isDuplicate(null, "{\"timers\":[]}"));
+	}
+
+	@Test
+	public void testIsDuplicateReturnsTrueWhenBytesEqual() {
+		String body = "{\"timers\":[{\"timer_type\":\"tree\"}]}";
+		assertTrue(MystixApiClient.isDuplicate(body, body));
+	}
+
+	@Test
+	public void testIsDuplicateReturnsFalseWhenBytesDiffer() {
+		/* Bodies differing only by player_username are not duplicates (multi-account safety). */
+		String bodyA = "{\"player_username\":\"PlayerA\",\"timers\":[]}";
+		String bodyB = "{\"player_username\":\"PlayerB\",\"timers\":[]}";
+		assertFalse(MystixApiClient.isDuplicate(bodyA, bodyB));
+	}
+
+	@Test
+	public void testDuplicateSendWithEmptyAppKeyDoesNotThrow() {
+		/* The dedupe guard runs after the app-key guard, so the empty-key path is unaffected. */
+		MystixApiClient client = new MystixApiClient(emptyKeyConfig(), new Gson(), new OkHttpClient());
+		TimerSyncItem item = new TimerSyncItem("bird house", "fossil island", "bird house",
+				Instant.ofEpochSecond(1700000000L), true, "TestPlayer", null, null, null, 0);
+		client.sendTimersSync(Collections.singletonList(item));
+		client.sendTimersSync(Collections.singletonList(item));
+		// Should not throw; with empty key both return early before the dedupe check
+	}
 }
