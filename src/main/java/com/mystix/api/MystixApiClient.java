@@ -15,6 +15,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 import javax.inject.Inject;
 import javax.inject.Singleton;
@@ -50,6 +51,10 @@ public class MystixApiClient
 	private final OkHttpClient okHttpClient;
 	private final OkHttpClient largeRequestClient;
 
+	// Last successfully-sent body per syncType; skips byte-identical idempotent
+	// re-syncs. Excludes loot-drops, which are append-style events.
+	private final Map<String, String> lastSentBodyByType = new ConcurrentHashMap<>();
+
 	@Inject
 	public MystixApiClient(MystixConfig config, Gson gson, OkHttpClient okHttpClient)
 	{
@@ -67,32 +72,32 @@ public class MystixApiClient
 	public void sendTimersSync(List<TimerSyncItem> timers)
 	{
 		String json = TimersSyncPayload.toJson(timers);
-		postAsync(TIMERS_ENDPOINT, json, "timers", false,
+		postAsync(TIMERS_ENDPOINT, json, "timers", false, true,
 			() -> log.debug("Mystix timers sync successful: {} timers", timers.size()));
 	}
 
 	public void sendPlayerSkillsSync(PlayerSkillsSyncPayload payload)
 	{
-		postAsync(SKILLS_ENDPOINT, payload.toJson(gson), "skills", false,
+		postAsync(SKILLS_ENDPOINT, payload.toJson(gson), "skills", false, true,
 			() -> log.debug("Mystix player skills sync successful for player: {}", payload.getPlayer()));
 	}
 
 	public void sendLoadoutSync(LoadoutSyncPayload payload)
 	{
-		postAsync(LOADOUT_ENDPOINT, payload.toJson(gson), "loadout", false,
+		postAsync(LOADOUT_ENDPOINT, payload.toJson(gson), "loadout", false, true,
 			() -> log.debug("Mystix loadout sync successful for player: {}", payload.getPlayerUsername()));
 	}
 
 	public void sendBankSync(BankSyncPayload payload)
 	{
-		postAsync(BANK_ENDPOINT, payload.toJson(gson), "bank", false,
+		postAsync(BANK_ENDPOINT, payload.toJson(gson), "bank", false, true,
 			() -> log.debug("Mystix bank sync successful: {} items for player: {}",
 				payload.getTotalItemCount(), payload.getPlayerUsername()));
 	}
 
 	public void sendLootSync(LootSyncPayload payload)
 	{
-		postAsync(LOOT_ENDPOINT, payload.toJson(gson), "loot", true,
+		postAsync(LOOT_ENDPOINT, payload.toJson(gson), "loot", true, true,
 			() -> log.debug("Mystix loot sync successful: {} records for player: {}",
 				payload.getLootRecords().size(), payload.getPlayerUsername()));
 	}
@@ -124,17 +129,24 @@ public class MystixApiClient
 		payload.put("drops", dropList);
 
 		String json = gson.toJson(payload);
-		postAsync(LOOT_DROP_ENDPOINT, json, "loot-drops", true,
+		// Append-style events: each batch is distinct (fresh dropped_at per drop), so never dedupe.
+		postAsync(LOOT_DROP_ENDPOINT, json, "loot-drops", true, false,
 			() -> log.debug("Mystix loot drops batch recorded: {} drops for player: {}",
 				drops.size(), playerUsername));
 	}
 
 	private void postAsync(String endpoint, String json, String syncType, boolean largeRequest,
-		Runnable onSuccess)
+		boolean dedupe, Runnable onSuccess)
 	{
 		if (!SyncGuard.hasAppKey(config))
 		{
 			log.debug("Skipping {} sync: no Mystix App Key configured", syncType);
+			return;
+		}
+
+		if (dedupe && isDuplicate(lastSentBodyByType.get(syncType), json))
+		{
+			log.debug("Skipping {} sync: identical to last sent request", syncType);
 			return;
 		}
 
@@ -164,6 +176,10 @@ public class MystixApiClient
 				{
 					if (response.code() >= HTTP_OK_MIN && response.code() < HTTP_OK_MAX)
 					{
+						if (dedupe)
+						{
+							lastSentBodyByType.put(syncType, json);
+						}
 						onSuccess.run();
 					}
 					else
@@ -177,5 +193,10 @@ public class MystixApiClient
 				}
 			}
 		});
+	}
+
+	static boolean isDuplicate(String previousBody, String currentJson)
+	{
+		return previousBody != null && previousBody.equals(currentJson);
 	}
 }
