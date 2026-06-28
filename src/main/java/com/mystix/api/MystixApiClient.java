@@ -358,4 +358,18 @@ public class MystixApiClient
 	{
 		return previousBody != null && previousBody.equals(currentJson);
 	}
+
+	/**
+	 * Forgets the last-sent body for every sync type, so the next send of each
+	 * type goes out even if its payload is byte-identical to the previous one.
+	 *
+	 * <p>The roadmap panel's "Sync &amp; refresh" is an explicit, user-triggered
+	 * re-sync: the dedupe guard (which silently skips unchanged idempotent syncs)
+	 * must not swallow it, or the button would do nothing when the player's data
+	 * hasn't changed since the last automatic sync.
+	 */
+	public void clearDedupeCache()
+	{
+		lastSentBodyByType.clear();
+	}
 }

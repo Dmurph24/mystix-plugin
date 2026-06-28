@@ -178,6 +178,10 @@ public class MystixPlugin extends Plugin {
 	 * client thread, so this never blocks the caller (the EDT).
 	 */
 	private void forceSyncAll() {
+		// This is an explicit user re-sync: clear the request-dedupe cache so an
+		// unchanged payload still gets sent (the monitors each reset their own
+		// dedupe state in forceSync(), but the client-side cache is separate).
+		apiClient.clearDedupeCache();
 		timerMonitor.forceSync();
 		playerSkillsMonitor.forceSync();
 		bankMemoryMonitor.forceSync();
