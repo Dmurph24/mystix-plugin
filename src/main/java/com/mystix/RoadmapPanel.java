@@ -5,12 +5,18 @@ import com.mystix.model.Roadmap;
 import com.mystix.model.RoadmapGoal;
 import com.mystix.model.RoadmapList;
 import com.mystix.model.RoadmapSummary;
+import java.awt.BasicStroke;
 import java.awt.BorderLayout;
 import java.awt.Color;
 import java.awt.Component;
 import java.awt.Dimension;
+import java.awt.Graphics;
+import java.awt.Graphics2D;
 import java.awt.Insets;
+import java.awt.Rectangle;
+import java.awt.RenderingHints;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -58,6 +64,11 @@ public class RoadmapPanel extends PluginPanel {
 	private static final int NAME_WRAP_WIDTH = 165;
 	/** Left indent (px) added per prerequisite-depth level, mirroring the app. */
 	private static final int INDENT_PER_DEPTH = 14;
+	/** Vertical gap (px) between goal rows; the connector verticals bridge it. */
+	private static final int ROW_GAP = 4;
+	/** Where an elbow branches into a card (px from the card top, ~the name line). */
+	private static final int CONNECTOR_Y_OFFSET = 14;
+	private static final Color GUIDE_COLOR = new Color(0x5A, 0x5A, 0x5A);
 
 	private final RoadmapManager roadmapManager;
 	private final ScheduledExecutorService executor;
@@ -67,7 +78,7 @@ public class RoadmapPanel extends PluginPanel {
 	private final JButton syncButton = new JButton("Check for completions");
 	private final JButton reloadButton = new JButton("Load Roadmaps from App");
 	private final JLabel statusLabel = new JLabel();
-	private final JPanel goalsPanel = new JPanel();
+	private final GoalsTreePanel goalsPanel = new GoalsTreePanel();
 
 	private boolean suppressSelectorEvents = false;
 
@@ -288,6 +299,7 @@ public class RoadmapPanel extends PluginPanel {
 
 	private void renderGoals(Roadmap roadmap) {
 		goalsPanel.removeAll();
+		goalsPanel.setRowGuides(Collections.emptyList());
 		List<RoadmapGoal> goals = roadmap.getGoalsSorted();
 		if (goals.isEmpty()) {
 			JLabel empty = new JLabel("This roadmap has no goals yet.");
@@ -306,14 +318,58 @@ public class RoadmapPanel extends PluginPanel {
 				orderByPrereqs(g, byId, visited, ordered, new HashSet<>());
 			}
 			Map<Integer, Integer> depthMemo = new HashMap<>();
-			for (RoadmapGoal goal : ordered) {
-				int depth = prereqDepth(goal, byId, depthMemo, new HashSet<>());
-				goalsPanel.add(indentRow(buildGoalRow(goal, depth), depth));
-				goalsPanel.add(Box.createVerticalStrut(4));
+			int[] depths = new int[ordered.size()];
+			for (int i = 0; i < ordered.size(); i++) {
+				depths[i] = prereqDepth(ordered.get(i), byId, depthMemo, new HashSet<>());
 			}
+			Guide[][] guides = computeGuides(depths);
+			List<RowGuide> rowGuides = new ArrayList<>();
+			for (int i = 0; i < ordered.size(); i++) {
+				JComponent rowComp = indentRow(buildGoalRow(ordered.get(i), depths[i]), depths[i]);
+				goalsPanel.add(rowComp);
+				goalsPanel.add(Box.createVerticalStrut(ROW_GAP));
+				rowGuides.add(new RowGuide(rowComp, guides[i]));
+			}
+			goalsPanel.setRowGuides(rowGuides);
 		}
 		goalsPanel.revalidate();
 		goalsPanel.repaint();
+	}
+
+	/**
+	 * Per-row connector guides from the ordered depth sequence (ported from the
+	 * app's tree painter). For each row, one guide per gutter column: the node's
+	 * own column is a tee (has a following sibling) or corner (last); ancestor
+	 * columns continue (through) only while their branch has a later sibling.
+	 */
+	private static Guide[][] computeGuides(int[] depths) {
+		Guide[][] result = new Guide[depths.length][];
+		for (int i = 0; i < depths.length; i++) {
+			int d = depths[i];
+			Guide[] cols = new Guide[d];
+			for (int c = 0; c < d; c++) {
+				if (c == d - 1) {
+					cols[c] = hasFollowingAtLevel(depths, i, d) ? Guide.TEE : Guide.CORNER;
+				} else {
+					cols[c] = hasFollowingAtLevel(depths, i, c + 1) ? Guide.THROUGH : Guide.NONE;
+				}
+			}
+			result[i] = cols;
+		}
+		return result;
+	}
+
+	/** Whether a later row sits at exactly {@code level} before the branch closes. */
+	private static boolean hasFollowingAtLevel(int[] depths, int from, int level) {
+		for (int j = from + 1; j < depths.length; j++) {
+			if (depths[j] < level) {
+				return false;
+			}
+			if (depths[j] == level) {
+				return true;
+			}
+		}
+		return false;
 	}
 
 	/** Depth-first order placing each goal after all of its prerequisites. */
@@ -504,11 +560,90 @@ public class RoadmapPanel extends PluginPanel {
 
 	private void clearGoals() {
 		goalsPanel.removeAll();
+		goalsPanel.setRowGuides(Collections.emptyList());
 		goalsPanel.revalidate();
 		goalsPanel.repaint();
 	}
 
 	private void setStatus(String text) {
 		statusLabel.setText(text == null ? "" : text);
+	}
+
+	/** Connector style for one gutter column of a row (mirrors the app). */
+	private enum Guide {
+		NONE,
+		THROUGH,
+		TEE,
+		CORNER
+	}
+
+	/** A rendered row paired with its per-column connector guides. */
+	private static final class RowGuide {
+		private final Component component;
+		private final Guide[] guides;
+
+		RowGuide(Component component, Guide[] guides) {
+			this.component = component;
+			this.guides = guides;
+		}
+	}
+
+	/**
+	 * The goals container, which also paints the dependency-tree connector lines
+	 * in the indent gutters. Lines are drawn under the cards (cards sit to the
+	 * right of the gutters), and verticals extend by {@link #ROW_GAP} to bridge
+	 * the strut between rows so a branch reads as one continuous line.
+	 */
+	private static final class GoalsTreePanel extends JPanel {
+		private List<RowGuide> rowGuides = Collections.emptyList();
+
+		void setRowGuides(List<RowGuide> rowGuides) {
+			this.rowGuides = rowGuides;
+		}
+
+		@Override
+		protected void paintComponent(Graphics g) {
+			super.paintComponent(g);
+			Graphics2D g2 = (Graphics2D) g.create();
+			try {
+				g2.setColor(GUIDE_COLOR);
+				g2.setStroke(new BasicStroke(2f));
+				g2.setRenderingHint(
+						RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+				for (RowGuide rg : rowGuides) {
+					paintRowGuides(g2, rg);
+				}
+			} finally {
+				g2.dispose();
+			}
+		}
+
+		private void paintRowGuides(Graphics2D g2, RowGuide rg) {
+			Rectangle b = rg.component.getBounds();
+			Guide[] guides = rg.guides;
+			int depth = guides.length;
+			int elbowY = b.y + CONNECTOR_Y_OFFSET;
+			int bottom = b.y + b.height + ROW_GAP; // bridge the inter-row strut
+			for (int c = 0; c < depth; c++) {
+				int cx = c * INDENT_PER_DEPTH + INDENT_PER_DEPTH / 2;
+				int cardLeft = depth * INDENT_PER_DEPTH;
+				switch (guides[c]) {
+					case THROUGH:
+						g2.drawLine(cx, b.y, cx, bottom);
+						break;
+					case TEE:
+						g2.drawLine(cx, b.y, cx, bottom);
+						g2.drawLine(cx, elbowY, cardLeft, elbowY);
+						break;
+					case CORNER:
+						g2.drawLine(cx, b.y, cx, elbowY);
+						g2.drawLine(cx, elbowY, cardLeft, elbowY);
+						break;
+					case NONE:
+					default:
+						break;
+				}
+			}
+		}
 	}
 }
