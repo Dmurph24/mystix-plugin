@@ -192,18 +192,27 @@ public class MystixPlugin extends Plugin {
 	@Subscribe
 	public void onGameStateChanged(GameStateChanged event) {
 		if (event.getGameState() == GameState.LOGGED_IN) {
-			// Give the username/data a moment to settle after login, then load the
-			// roadmaps so the panel populates without a manual "Reload". When the
-			// panel is open its load also warms the overlay cache; when it's closed
-			// we just warm the cache directly for the overlay.
-			executorService.schedule(() -> {
-				RoadmapPanel panel = roadmapPanel;
-				if (panel != null) {
-					SwingUtilities.invokeLater(panel::loadRoadmaps);
-				} else {
-					roadmapManager.refreshSelectedQuietly();
-				}
-			}, 8, java.util.concurrent.TimeUnit.SECONDS);
+			// Load the roadmap almost immediately so it shows right after login
+			// (a plain read, NOT a forced re-sync), then again once this session's
+			// login syncs have landed so completion/progress is fresh.
+			executorService.schedule(
+					this::loadRoadmapQuietly, 1, java.util.concurrent.TimeUnit.SECONDS);
+			executorService.schedule(
+					this::loadRoadmapQuietly, 8, java.util.concurrent.TimeUnit.SECONDS);
+		}
+	}
+
+	/**
+	 * Reloads the roadmap without forcing a data re-sync: refreshes the open panel
+	 * (which also warms the overlay cache) or, when the panel is closed, just warms
+	 * the overlay cache directly.
+	 */
+	private void loadRoadmapQuietly() {
+		RoadmapPanel panel = roadmapPanel;
+		if (panel != null) {
+			SwingUtilities.invokeLater(panel::loadRoadmaps);
+		} else {
+			roadmapManager.refreshSelectedQuietly();
 		}
 	}
 

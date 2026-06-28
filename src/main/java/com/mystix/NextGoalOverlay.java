@@ -8,6 +8,8 @@ import java.awt.FontMetrics;
 import java.awt.Graphics2D;
 import java.awt.Point;
 import java.awt.image.BufferedImage;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Locale;
 import javax.inject.Inject;
 import net.runelite.api.Skill;
@@ -19,7 +21,6 @@ import net.runelite.client.ui.overlay.components.ComponentOrientation;
 import net.runelite.client.ui.overlay.components.ImageComponent;
 import net.runelite.client.ui.overlay.components.LineComponent;
 import net.runelite.client.ui.overlay.components.SplitComponent;
-import net.runelite.client.ui.overlay.components.TitleComponent;
 
 /**
  * Game-window overlay showing the current goal of the selected roadmap.
@@ -37,6 +38,8 @@ public class NextGoalOverlay extends OverlayPanel {
 	private static final int WIDTH_PADDING = 14;
 	/** Floor so a very short goal still renders as a panel, not a sliver. */
 	private static final int MIN_WIDTH = 120;
+	/** Text wraps onto a new line once it would exceed this width. */
+	private static final int MAX_TEXT_WIDTH = 200;
 	/** Gap between the item icon and the goal name. */
 	private static final int ICON_GAP = 6;
 
@@ -81,37 +84,80 @@ public class NextGoalOverlay extends OverlayPanel {
 				: title + " - Current Goal";
 		String goalName = goal.getName();
 		BufferedImage icon = iconFor(goal);
+		int iconWidth = icon != null ? icon.getWidth() : 0;
+
+		// Word-wrap both lines so long content flows onto multiple lines instead
+		// of spilling past the background box. The first goal-name line also
+		// carries the icon, so it wraps in the narrower space left of it.
+		FontMetrics metrics = graphics.getFontMetrics();
+		List<String> titleLines = wrapText(header, MAX_TEXT_WIDTH, metrics);
+		int contentMax = MAX_TEXT_WIDTH - (icon != null ? iconWidth + ICON_GAP : 0);
+		List<String> goalLines = wrapText(goalName, contentMax, metrics);
+
+		// Size the panel to the actual widest rendered line (left-aligned).
+		int widest = 0;
+		for (String line : titleLines) {
+			widest = Math.max(widest, metrics.stringWidth(line));
+		}
+		for (int i = 0; i < goalLines.size(); i++) {
+			int w = metrics.stringWidth(goalLines.get(i));
+			if (i == 0 && icon != null) {
+				w += iconWidth + ICON_GAP;
+			}
+			widest = Math.max(widest, w);
+		}
 
 		panelComponent.getChildren().clear();
-
-		// Size the panel to the widest line. RuneLite's TitleComponent centres its
-		// text within the panel's preferred width and doesn't wrap, so a fixed
-		// width makes longer roadmap/goal names spill past the background box.
-		FontMetrics metrics = graphics.getFontMetrics();
-		int nameLineWidth = metrics.stringWidth(goalName)
-				+ (icon != null ? icon.getWidth() + ICON_GAP : 0);
-		int contentWidth = Math.max(metrics.stringWidth(header), nameLineWidth);
 		panelComponent.setPreferredSize(
-				new Dimension(Math.max(MIN_WIDTH, contentWidth + WIDTH_PADDING), 0));
+				new Dimension(Math.max(MIN_WIDTH, widest + WIDTH_PADDING), 0));
 
-		panelComponent.getChildren().add(TitleComponent.builder()
-				.text(header)
-				.color(TITLE_COLOR)
-				.build());
-
-		LineComponent nameLine = LineComponent.builder().left(goalName).build();
-		if (icon != null) {
-			panelComponent.getChildren().add(SplitComponent.builder()
-					.first(new ImageComponent(icon))
-					.second(nameLine)
-					.orientation(ComponentOrientation.HORIZONTAL)
-					.gap(new Point(ICON_GAP, 0))
+		// Title: left-aligned orange line(s).
+		for (String line : titleLines) {
+			panelComponent.getChildren().add(LineComponent.builder()
+					.left(line)
+					.leftColor(TITLE_COLOR)
 					.build());
-		} else {
-			panelComponent.getChildren().add(nameLine);
+		}
+		// Goal name: left-aligned line(s); the icon sits beside the first line.
+		for (int i = 0; i < goalLines.size(); i++) {
+			LineComponent line = LineComponent.builder().left(goalLines.get(i)).build();
+			if (i == 0 && icon != null) {
+				panelComponent.getChildren().add(SplitComponent.builder()
+						.first(new ImageComponent(icon))
+						.second(line)
+						.orientation(ComponentOrientation.HORIZONTAL)
+						.gap(new Point(ICON_GAP, 0))
+						.build());
+			} else {
+				panelComponent.getChildren().add(line);
+			}
 		}
 
 		return super.render(graphics);
+	}
+
+	/** Greedily word-wraps text into lines no wider than {@code maxWidth}. */
+	private static List<String> wrapText(String text, int maxWidth, FontMetrics metrics) {
+		List<String> lines = new ArrayList<>();
+		StringBuilder line = new StringBuilder();
+		for (String word : text.trim().split("\\s+")) {
+			if (line.length() == 0) {
+				line.append(word);
+			} else if (metrics.stringWidth(line + " " + word) <= maxWidth) {
+				line.append(' ').append(word);
+			} else {
+				lines.add(line.toString());
+				line.setLength(0);
+				line.append(word);
+			}
+		}
+		if (line.length() > 0) {
+			lines.add(line.toString());
+		}
+		if (lines.isEmpty()) {
+			lines.add(text);
+		}
+		return lines;
 	}
 
 	/** The goal's icon: an item sprite, a skill icon, or null when neither. */
