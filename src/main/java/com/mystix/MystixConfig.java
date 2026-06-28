@@ -30,4 +30,9 @@ public interface MystixConfig extends Config {
 	default boolean syncLoot() {
 		return true;
 	}
+
+	@ConfigItem(keyName = "showNextGoal", name = "Show next goal overlay", description = "Show the next uncompleted goal from your selected roadmap as an overlay in the game window.", position = 6)
+	default boolean showNextGoal() {
+		return false;
+	}
 }

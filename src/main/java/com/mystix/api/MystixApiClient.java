@@ -1,6 +1,7 @@
 package com.mystix.api;
 
 import com.google.gson.Gson;
+import com.google.gson.JsonSyntaxException;
 import com.mystix.MystixConfig;
 import com.mystix.SyncGuard;
 import com.mystix.model.BankSyncPayload;
@@ -8,9 +9,14 @@ import com.mystix.model.LoadoutSyncPayload;
 import com.mystix.model.LootDropPayload;
 import com.mystix.model.LootSyncPayload;
 import com.mystix.model.PlayerSkillsSyncPayload;
+import com.mystix.model.Roadmap;
+import com.mystix.model.RoadmapList;
 import com.mystix.model.TimerSyncItem;
 import com.mystix.model.TimersSyncPayload;
 import java.io.IOException;
+import java.io.UnsupportedEncodingException;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -41,6 +47,7 @@ public class MystixApiClient
 	private static final String LOADOUT_ENDPOINT = "/api/runelite/loadouts/";
 	private static final String LOOT_ENDPOINT = "/api/runelite/loot/";
 	private static final String LOOT_DROP_ENDPOINT = "/api/runelite/loot/drop/";
+	private static final String ROADMAPS_ENDPOINT = "/api/runelite/roadmaps/";
 
 	private static final int HTTP_OK_MIN = 200;
 	private static final int HTTP_OK_MAX = 300;
@@ -127,6 +134,146 @@ public class MystixApiClient
 		postAsync(LOOT_DROP_ENDPOINT, json, "loot-drops", true,
 			() -> log.debug("Mystix loot drops batch recorded: {} drops for player: {}",
 				drops.size(), playerUsername));
+	}
+
+	/**
+	 * Result callback for roadmap reads. Both methods are invoked on the OkHttp
+	 * dispatcher thread (not the client/EDT thread); callers that touch Swing must
+	 * marshal back via SwingUtilities.invokeLater.
+	 *
+	 * @param <T> parsed response type
+	 */
+	public interface RoadmapCallback<T>
+	{
+		void onSuccess(T result);
+
+		void onError(String message);
+	}
+
+	/**
+	 * Fetches the player's roadmaps (id/title/goal_count) for the panel selector.
+	 */
+	public void getRoadmaps(String playerUsername, RoadmapCallback<RoadmapList> callback)
+	{
+		String url = ROADMAPS_ENDPOINT + "?player=" + urlEncode(playerUsername);
+		getAsync(url, "roadmaps", RoadmapList.class, callback);
+	}
+
+	/**
+	 * Fetches a single roadmap fully rendered (goals + progress).
+	 */
+	public void getRoadmap(int collectionId, String playerUsername, RoadmapCallback<Roadmap> callback)
+	{
+		String url = ROADMAPS_ENDPOINT + collectionId + "/?player=" + urlEncode(playerUsername);
+		getAsync(url, "roadmap", Roadmap.class, callback);
+	}
+
+	/**
+	 * Recomputes a roadmap's goal completion against current synced data and
+	 * returns the re-rendered roadmap.
+	 */
+	public void recomputeRoadmap(int collectionId, String playerUsername, RoadmapCallback<Roadmap> callback)
+	{
+		String url = ROADMAPS_ENDPOINT + collectionId + "/recompute/";
+		Map<String, Object> body = new LinkedHashMap<>();
+		body.put("player", playerUsername);
+		postForResult(url, gson.toJson(body), "roadmap-recompute", Roadmap.class, callback);
+	}
+
+	private <T> void getAsync(String endpoint, String label, Class<T> type, RoadmapCallback<T> callback)
+	{
+		if (!SyncGuard.hasAppKey(config))
+		{
+			callback.onError("No Mystix App Key configured");
+			return;
+		}
+
+		Request request = new Request.Builder()
+			.url(API_BASE_URL + endpoint)
+			.header("X-RuneLite-Key", config.mystixAppKey().trim())
+			.get()
+			.build();
+
+		okHttpClient.newCall(request).enqueue(parsingCallback(label, type, callback));
+	}
+
+	private <T> void postForResult(String endpoint, String json, String label, Class<T> type,
+		RoadmapCallback<T> callback)
+	{
+		if (!SyncGuard.hasAppKey(config))
+		{
+			callback.onError("No Mystix App Key configured");
+			return;
+		}
+
+		Request request = new Request.Builder()
+			.url(API_BASE_URL + endpoint)
+			.header("Content-Type", "application/json")
+			.header("X-RuneLite-Key", config.mystixAppKey().trim())
+			.post(RequestBody.create(JSON_MEDIA_TYPE, json))
+			.build();
+
+		largeRequestClient.newCall(request).enqueue(parsingCallback(label, type, callback));
+	}
+
+	private <T> Callback parsingCallback(String label, Class<T> type, RoadmapCallback<T> callback)
+	{
+		return new Callback()
+		{
+			@Override
+			public void onFailure(Call call, IOException e)
+			{
+				log.warn("Failed {} request to Mystix API: {}", label, e.getMessage());
+				callback.onError("Network error");
+			}
+
+			@Override
+			public void onResponse(Call call, Response response)
+			{
+				try
+				{
+					if (response.code() < HTTP_OK_MIN || response.code() >= HTTP_OK_MAX)
+					{
+						log.warn("Mystix API returned {} for {}", response.code(), label);
+						callback.onError("Server returned " + response.code());
+						return;
+					}
+					String responseBody = response.body() != null ? response.body().string() : "";
+					T parsed = gson.fromJson(responseBody, type);
+					if (parsed == null)
+					{
+						callback.onError("Empty response");
+						return;
+					}
+					callback.onSuccess(parsed);
+				}
+				catch (IOException | JsonSyntaxException e)
+				{
+					log.warn("Failed to parse {} response: {}", label, e.getMessage());
+					callback.onError("Could not read response");
+				}
+				finally
+				{
+					response.close();
+				}
+			}
+		};
+	}
+
+	private static String urlEncode(String value)
+	{
+		if (value == null)
+		{
+			return "";
+		}
+		try
+		{
+			return URLEncoder.encode(value, StandardCharsets.UTF_8.name());
+		}
+		catch (UnsupportedEncodingException e)
+		{
+			return value;
+		}
 	}
 
 	private void postAsync(String endpoint, String json, String syncType, boolean largeRequest,

@@ -37,6 +37,11 @@ Each source plugin has an on/off toggle. Enable only the plugins you want synced
 - **Player Skills sync** — Automatically sends all player skill levels to the Mystix server when logging in or out
   - Allows the Mystix app to display and track your character's skill progression
   - Syncs on login and logout events when a valid App Key is configured
+- **Roadmap side panel** — Adds a Mystix tab to the RuneLite side bar that lists your roadmaps and their goals
+  - Pick which roadmap to view (you can have several)
+  - **Sync & refresh** button re-pushes all your data (timers, skills, bank, loadout, loot) then recomputes the selected roadmap on the server and re-renders it
+  - Logging out and back in helps push the latest progress; a completed goal can take a few minutes to update
+- **Next goal overlay** (opt-in) — Enable **Show next goal overlay** in the plugin settings to display the next uncompleted goal of your selected roadmap (name + progress) in the game window
 
 ## Building
 

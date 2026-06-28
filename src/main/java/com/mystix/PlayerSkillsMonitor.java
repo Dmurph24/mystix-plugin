@@ -44,6 +44,14 @@ public class PlayerSkillsMonitor {
 		previousGameState = GameState.UNKNOWN;
 	}
 
+	/**
+	 * Re-runs the skills sync immediately on the background executor. Used by the
+	 * roadmap panel's "Sync &amp; refresh" button to re-push current progress.
+	 */
+	public void forceSync() {
+		executorService.execute(this::syncPlayerSkills);
+	}
+
 	@Subscribe
 	public void onGameStateChanged(GameStateChanged event) {
 		GameState newState = event.getGameState();
