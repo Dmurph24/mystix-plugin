@@ -419,7 +419,9 @@ public class RoadmapPanel extends PluginPanel {
 		}
 		JPanel wrapper = new JPanel();
 		wrapper.setLayout(new BoxLayout(wrapper, BoxLayout.X_AXIS));
-		wrapper.setBackground(ColorScheme.DARK_GRAY_COLOR);
+		// Transparent so the connector lines painted by GoalsTreePanel show
+		// through the indent gutter instead of being covered by the row's bg.
+		wrapper.setOpaque(false);
 		wrapper.setAlignmentX(Component.LEFT_ALIGNMENT);
 		wrapper.add(Box.createHorizontalStrut(depth * INDENT_PER_DEPTH));
 		wrapper.add(card);
