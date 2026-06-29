@@ -97,6 +97,18 @@ public class LoadoutMonitor {
 		lastSyncJson = null;
 	}
 
+	/**
+	 * Re-runs the loadout sync immediately (on the client thread, since it reads
+	 * item containers), forcing a resend by clearing the change-detection
+	 * snapshot. Used by the roadmap panel's "Sync &amp; refresh" button.
+	 */
+	public void forceSync() {
+		executorService.execute(() -> clientThread.invokeLater(() -> {
+			lastSyncJson = null;
+			syncLoadouts();
+		}));
+	}
+
 	@Subscribe
 	public void onGameStateChanged(GameStateChanged event) {
 		if (!config.syncLoadouts()) {

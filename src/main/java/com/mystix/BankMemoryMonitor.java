@@ -16,6 +16,7 @@ import net.runelite.api.Client;
 import net.runelite.api.ItemContainer;
 import net.runelite.api.events.ItemContainerChanged;
 import net.runelite.api.gameval.InventoryID;
+import net.runelite.client.callback.ClientThread;
 import net.runelite.client.eventbus.Subscribe;
 import net.runelite.client.game.ItemManager;
 
@@ -28,6 +29,7 @@ public class BankMemoryMonitor {
 	private static final long DEBOUNCE_SECONDS = 30;
 
 	private final Client client;
+	private final ClientThread clientThread;
 	private final MystixConfig config;
 	private final MystixApiClient apiClient;
 	private final ItemManager itemManager;
@@ -42,17 +44,39 @@ public class BankMemoryMonitor {
 	@Inject
 	public BankMemoryMonitor(
 			Client client,
+			ClientThread clientThread,
 			MystixConfig config,
 			MystixApiClient apiClient,
 			ItemManager itemManager,
 			Gson gson,
 			ScheduledExecutorService executor) {
 		this.client = client;
+		this.clientThread = clientThread;
 		this.config = config;
 		this.apiClient = apiClient;
 		this.itemManager = itemManager;
 		this.gson = gson;
 		this.executor = executor;
+	}
+
+	/**
+	 * Re-reads the bank/inventory/equipment on the client thread and re-pushes
+	 * it immediately, forcing a resend by clearing the change-detection cache.
+	 * Used by the roadmap panel's "Sync &amp; refresh" button. The bank container
+	 * is only populated while the bank is (or was) open this session; if it is
+	 * null we simply skip, same as the reactive path.
+	 */
+	public void forceSync() {
+		clientThread.invokeLater(() -> {
+			lastSyncJson = null;
+			BankSyncPayload payload = buildPayload();
+			if (payload == null) {
+				return;
+			}
+			pendingJson = payload.toJson(gson);
+			pendingPayload = payload;
+			flushPending();
+		});
 	}
 
 	public void stop() {
@@ -86,29 +110,10 @@ public class BankMemoryMonitor {
 			return;
 		}
 
-		String playerUsername = SyncGuard.getPlayerUsername(client);
-		if (playerUsername == null) {
-			log.warn("Bank sync skipped: could not get player username");
+		BankSyncPayload payload = buildPayload();
+		if (payload == null) {
 			return;
 		}
-
-		ItemContainer bankContainer = client.getItemContainer(InventoryID.BANK);
-		if (bankContainer == null) {
-			return;
-		}
-
-		Map<Integer, Integer> bankQuantities = new LinkedHashMap<>();
-		ItemCollector.collectBankItems(bankContainer, itemManager, bankQuantities);
-
-		Map<Integer, Integer> invQuantities = new LinkedHashMap<>();
-		collectContainerItems(InventoryID.INV, invQuantities);
-		collectContainerItems(InventoryID.WORN, invQuantities);
-
-		Map<String, List<BankSyncPayload.BankItem>> itemsBySource = new LinkedHashMap<>();
-		itemsBySource.put(SOURCE_BANK, ItemCollector.toBankItemList(bankQuantities));
-		itemsBySource.put(SOURCE_INVENTORY, ItemCollector.toBankItemList(invQuantities));
-
-		BankSyncPayload payload = new BankSyncPayload(playerUsername, itemsBySource);
 		String json = payload.toJson(gson);
 
 		if (json.equals(lastSyncJson)) {
@@ -129,6 +134,43 @@ public class BankMemoryMonitor {
 			log.debug("Bank change detected, debouncing sync for {}s", DEBOUNCE_SECONDS);
 			pendingSync = executor.schedule(this::flushPending, DEBOUNCE_SECONDS, TimeUnit.SECONDS);
 		}
+	}
+
+	/**
+	 * Reads bank + inventory + equipment from the client and builds the sync
+	 * payload, or null if the data isn't available (no player, special game mode,
+	 * or the bank container hasn't been populated this session). Must run on the
+	 * client thread.
+	 */
+	private BankSyncPayload buildPayload() {
+		if (GameModeUtil.isSpecialGameMode(client)) {
+			log.debug("Bank sync skipped: special game mode detected");
+			return null;
+		}
+
+		String playerUsername = SyncGuard.getPlayerUsername(client);
+		if (playerUsername == null) {
+			log.warn("Bank sync skipped: could not get player username");
+			return null;
+		}
+
+		ItemContainer bankContainer = client.getItemContainer(InventoryID.BANK);
+		if (bankContainer == null) {
+			return null;
+		}
+
+		Map<Integer, Integer> bankQuantities = new LinkedHashMap<>();
+		ItemCollector.collectBankItems(bankContainer, itemManager, bankQuantities);
+
+		Map<Integer, Integer> invQuantities = new LinkedHashMap<>();
+		collectContainerItems(InventoryID.INV, invQuantities);
+		collectContainerItems(InventoryID.WORN, invQuantities);
+
+		Map<String, List<BankSyncPayload.BankItem>> itemsBySource = new LinkedHashMap<>();
+		itemsBySource.put(SOURCE_BANK, ItemCollector.toBankItemList(bankQuantities));
+		itemsBySource.put(SOURCE_INVENTORY, ItemCollector.toBankItemList(invQuantities));
+
+		return new BankSyncPayload(playerUsername, itemsBySource);
 	}
 
 	private synchronized void flushPending() {

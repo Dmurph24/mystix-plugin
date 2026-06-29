@@ -4,6 +4,8 @@ import com.google.gson.Gson;
 import com.mystix.MystixConfig;
 import com.mystix.model.BankSyncPayload;
 import com.mystix.model.PlayerSkillsSyncPayload;
+import com.mystix.model.Roadmap;
+import com.mystix.model.RoadmapList;
 import com.mystix.model.TimerSyncItem;
 import com.mystix.model.TimersSyncPayload;
 import java.time.Instant;
@@ -11,9 +13,12 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 import okhttp3.OkHttpClient;
 import org.junit.Test;
 
+import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
@@ -93,6 +98,44 @@ public class MystixApiClientTest {
 		assertTrue(json.contains("\"current_xp\":1200000"));
 		assertTrue(json.contains("\"current_xp\":800000"));
 		assertTrue(json.contains("\"current_xp\":2000000"));
+	}
+
+	@Test
+	public void testGetRoadmapsWithEmptyKeyCallsOnError() {
+		MystixApiClient client = new MystixApiClient(emptyKeyConfig(), new Gson(), new OkHttpClient());
+		AtomicReference<String> error = new AtomicReference<>();
+		AtomicBoolean success = new AtomicBoolean(false);
+		client.getRoadmaps("TestPlayer", new MystixApiClient.RoadmapCallback<RoadmapList>() {
+			@Override
+			public void onSuccess(RoadmapList result) {
+				success.set(true);
+			}
+
+			@Override
+			public void onError(String message) {
+				error.set(message);
+			}
+		});
+		// No key => synchronous onError, no network call.
+		assertFalse(success.get());
+		assertNotNull(error.get());
+	}
+
+	@Test
+	public void testRecomputeRoadmapWithEmptyKeyCallsOnError() {
+		MystixApiClient client = new MystixApiClient(emptyKeyConfig(), new Gson(), new OkHttpClient());
+		AtomicReference<String> error = new AtomicReference<>();
+		client.recomputeRoadmap(1, "TestPlayer", new MystixApiClient.RoadmapCallback<Roadmap>() {
+			@Override
+			public void onSuccess(Roadmap result) {
+			}
+
+			@Override
+			public void onError(String message) {
+				error.set(message);
+			}
+		});
+		assertEquals("No Mystix App Key configured", error.get());
 	}
 
 	@Test

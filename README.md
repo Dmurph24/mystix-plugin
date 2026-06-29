@@ -4,10 +4,10 @@ A RuneLite plugin that syncs Time Tracking data to the Mystix app. Sends expecte
 
 ## Installing the App
 
-The Mystix mobile app is currently in beta.
+Download the Mystix mobile app:
 
-- **iOS:** Install via TestFlight: https://testflight.apple.com/join/mGc4jcXW
-- **Android:** Android beta access requires your email to be added to an approved list of testers. If you are a reviewer and would like to look at the app, please respond in a PR comment and I can add you to the beta list.
+- **iOS:** [Download on the App Store](https://apps.apple.com/app/id6759767823)
+- **Android:** [Get it on Google Play](https://play.google.com/store/apps/details?id=app.mystix.mystix)
 
 ### How the Mystix App Works
 
@@ -37,6 +37,11 @@ Each source plugin has an on/off toggle. Enable only the plugins you want synced
 - **Player Skills sync** — Automatically sends all player skill levels to the Mystix server when logging in or out
   - Allows the Mystix app to display and track your character's skill progression
   - Syncs on login and logout events when a valid App Key is configured
+- **Roadmap side panel** — Adds a Mystix tab to the RuneLite side bar that lists your roadmaps and their goals
+  - Pick which roadmap to view (you can have several)
+  - **Sync & refresh** button re-pushes all your data (timers, skills, bank, loadout, loot) then recomputes the selected roadmap on the server and re-renders it
+  - Logging out and back in helps push the latest progress; a completed goal can take a few minutes to update
+- **Next goal overlay** (opt-in) — Enable **Show next goal overlay** in the plugin settings to display the next uncompleted goal of your selected roadmap (name + progress) in the game window
 
 ## Building
 

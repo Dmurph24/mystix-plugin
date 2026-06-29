@@ -89,6 +89,18 @@ public class TimerMonitor {
 		previousGameState = GameState.UNKNOWN;
 	}
 
+	/**
+	 * Re-runs the timer sync immediately on the background executor, forcing a
+	 * resend by clearing the change-detection snapshot. Used by the roadmap
+	 * panel's "Sync &amp; refresh" button.
+	 */
+	public void forceSync() {
+		executorService.execute(() -> {
+			lastSentSnapshot = null;
+			sync();
+		});
+	}
+
 	@Subscribe
 	public void onGameStateChanged(GameStateChanged event) {
 		GameState newState = event.getGameState();

@@ -119,6 +119,20 @@ public class LootMonitor
 		lastSyncHash = null;
 	}
 
+	/**
+	 * Re-runs the loot sync immediately on the background executor, forcing a
+	 * resend by clearing the change-detection hash. Used by the roadmap panel's
+	 * "Sync &amp; refresh" button.
+	 */
+	public void forceSync()
+	{
+		executorService.execute(() ->
+		{
+			lastSyncHash = null;
+			syncLoot();
+		});
+	}
+
 	@Subscribe
 	public void onGameStateChanged(GameStateChanged event)
 	{
