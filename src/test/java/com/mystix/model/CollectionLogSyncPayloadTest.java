@@ -8,6 +8,8 @@ import com.google.gson.Gson;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
+import java.util.TreeMap;
 import org.junit.Test;
 
 /**
@@ -16,22 +18,33 @@ import org.junit.Test;
 public class CollectionLogSyncPayloadTest {
 	private final Gson gson = new Gson();
 
+	private static Map<Integer, Integer> quantities(int... idThenQty) {
+		Map<Integer, Integer> map = new TreeMap<>();
+		for (int i = 0; i < idThenQty.length; i += 2) {
+			map.put(idThenQty[i], idThenQty[i + 1]);
+		}
+		return map;
+	}
+
 	@Test
 	public void testPayloadStructure() {
 		List<Integer> ids = Arrays.asList(12819, 12921, 13265);
-		CollectionLogSyncPayload payload = new CollectionLogSyncPayload("TestPlayer", ids);
+		CollectionLogSyncPayload payload =
+				new CollectionLogSyncPayload("TestPlayer", ids, quantities(12819, 5));
 		String json = payload.toJson(gson);
 
 		assertNotNull(json);
 		assertTrue(json.contains("\"player_username\":\"TestPlayer\""));
 		assertTrue(json.contains("\"collection_log\":[12819,12921,13265]"));
 		assertTrue(json.contains("\"collection_log_item_count\":3"));
+		// Gson serialises the map with string keys, matching the backend DictField.
+		assertTrue(json.contains("\"collection_log_quantities\":{\"12819\":5}"));
 	}
 
 	@Test
 	public void testItemCountMatchesListSize() {
 		CollectionLogSyncPayload payload = new CollectionLogSyncPayload(
-				"Zezima", Arrays.asList(1, 2, 3, 4));
+				"Zezima", Arrays.asList(1, 2, 3, 4), quantities());
 		assertEquals(4, payload.getItemCount());
 		assertEquals("Zezima", payload.getPlayerUsername());
 		assertEquals(4, payload.getCollectionLog().size());
@@ -40,7 +53,7 @@ public class CollectionLogSyncPayloadTest {
 	@Test
 	public void testEmptyList() {
 		CollectionLogSyncPayload payload = new CollectionLogSyncPayload(
-				"EmptyPlayer", Collections.emptyList());
+				"EmptyPlayer", Collections.emptyList(), quantities());
 		String json = payload.toJson(gson);
 
 		assertNotNull(json);
