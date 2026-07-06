@@ -28,9 +28,11 @@ import net.runelite.client.eventbus.Subscribe;
  *
  * <p>Triggers: a sync on login (after a short delay so diary varps have loaded) and on
  * logout, plus a near-real-time sync when a diary task completes. Diary task completion
- * flips a varp, so we mark a re-check on {@link VarbitChanged} and read+dedupe on the next
- * {@link GameTick} (throttled), which collapses varp churn to at most one read per few
- * ticks. A JSON equality check means an unchanged diary set is never resent.
+ * flips one of the diary varbits/varps, so we mark a re-check only when {@link VarbitChanged}
+ * reports one of those (see {@link AchievementDiariesReader#watches}) and read+dedupe on the
+ * next {@link GameTick} (throttled). Filtering to the diary vars keeps unrelated varbit churn
+ * during normal play from re-reading every few ticks; login/logout remain the completeness
+ * backstop. A JSON equality check means an unchanged diary set is never resent.
  */
 @Slf4j
 @Singleton
@@ -105,10 +107,16 @@ public class AchievementDiaryMonitor {
 		previousGameState = newState;
 	}
 
-	/** A diary task completion flips a varp; mark a re-check for the next game tick. */
+	/**
+	 * A diary task completion flips one of the diary varbits / varps; mark a re-check
+	 * for the next game tick only when a relevant var changed. Unrelated varbit churn
+	 * during normal play no longer triggers a full diary re-read every few ticks.
+	 */
 	@Subscribe
 	public void onVarbitChanged(VarbitChanged event) {
-		diaryCheckPending = true;
+		if (reader.watches(event.getVarbitId(), event.getVarpId())) {
+			diaryCheckPending = true;
+		}
 	}
 
 	@Subscribe

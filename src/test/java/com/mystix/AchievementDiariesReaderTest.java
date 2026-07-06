@@ -116,4 +116,21 @@ public class AchievementDiariesReaderTest {
 	private boolean desertMediumTask10(IntUnaryOperator varp) {
 		return reader.read(ALL_ZERO, varp).get("Desert").get("Medium").getTasks().get(10);
 	}
+
+	@Test
+	public void testWatchesOnlyDiaryVars() {
+		// Known diary vars from the spec: varbit 3566 (Karamja Easy task 0),
+		// varbit 4499 (Ardougne Easy complete), varp 1196 (Ardougne Easy tasks),
+		// varps 1198/1199 (Desert Medium special case).
+		assertTrue(reader.watches(3566, -1));
+		assertTrue(reader.watches(4499, -1));
+		assertTrue(reader.watches(-1, 1196));
+		assertTrue(reader.watches(-1, 1198));
+		assertTrue(reader.watches(-1, 1199));
+		// An unrelated varbit / varp must not trigger a re-check.
+		assertFalse(reader.watches(987654, 987654));
+		// A diary varbit id must not match just because it equals an unrelated varp,
+		// and vice versa: 3566 is a varbit, not a varp.
+		assertFalse(reader.watches(-1, 3566));
+	}
 }
