@@ -54,7 +54,12 @@ public interface MystixConfig extends Config {
 		return true;
 	}
 
-	@ConfigItem(keyName = "showNextGoal", name = "Show current goal overlay", description = "Show your current (next uncompleted) goal from the selected roadmap as an overlay in the game window.", position = 9)
+	@ConfigItem(keyName = "syncKillCounts", name = "Boss Kill Counts", description = "Sync your boss kill counts to Mystix, read from RuneLite's stored kill counts (the same source the !kc command uses). Updates on login and as you get new kills.", position = 9)
+	default boolean syncKillCounts() {
+		return true;
+	}
+
+	@ConfigItem(keyName = "showNextGoal", name = "Show current goal overlay", description = "Show your current (next uncompleted) goal from the selected roadmap as an overlay in the game window.", position = 10)
 	default boolean showNextGoal() {
 		return true;
 	}

@@ -40,6 +40,13 @@ public class MystixConfigTest
 	}
 
 	@Test
+	public void testDefaultSyncKillCountsIsTrue()
+	{
+		TestMystixConfig config = new TestMystixConfig();
+		assertTrue(config.syncKillCounts());
+	}
+
+	@Test
 	public void testDefaultShowNextGoalIsFalse()
 	{
 		// The overlay is opt-in; off by default.
