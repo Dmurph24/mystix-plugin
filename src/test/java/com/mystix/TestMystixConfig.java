@@ -11,6 +11,7 @@ public class TestMystixConfig implements MystixConfig {
 	private boolean syncQuests = true;
 	private boolean syncAchievementDiaries = true;
 	private boolean syncCombatAchievements = true;
+	private boolean syncKillCounts = true;
 	private boolean showNextGoal = false;
 
 	@Override
@@ -49,6 +50,11 @@ public class TestMystixConfig implements MystixConfig {
 	}
 
 	@Override
+	public boolean syncKillCounts() {
+		return syncKillCounts;
+	}
+
+	@Override
 	public boolean showNextGoal() {
 		return showNextGoal;
 	}
@@ -79,6 +85,10 @@ public class TestMystixConfig implements MystixConfig {
 
 	public void setSyncCombatAchievements(boolean value) {
 		this.syncCombatAchievements = value;
+	}
+
+	public void setSyncKillCounts(boolean value) {
+		this.syncKillCounts = value;
 	}
 
 	public void setShowNextGoal(boolean value) {
