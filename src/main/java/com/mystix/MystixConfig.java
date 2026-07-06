@@ -21,6 +21,11 @@ public interface MystixConfig extends Config {
 		return true;
 	}
 
+	@ConfigItem(keyName = "syncCollectionLog", name = "Collection Log", description = "Sync your Collection Log to Mystix. Reads automatically the first time you open your collection log each session, then updates as you unlock new items.", position = 3)
+	default boolean syncCollectionLog() {
+		return true;
+	}
+
 	@ConfigItem(keyName = "syncLoadouts", name = "Sync Loadouts", description = "Sync your active equipment and Inventory Setups loadouts to Mystix.", position = 4)
 	default boolean syncLoadouts() {
 		return true;

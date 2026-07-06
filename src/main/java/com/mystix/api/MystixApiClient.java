@@ -5,6 +5,7 @@ import com.google.gson.JsonSyntaxException;
 import com.mystix.MystixConfig;
 import com.mystix.SyncGuard;
 import com.mystix.model.BankSyncPayload;
+import com.mystix.model.CollectionLogSyncPayload;
 import com.mystix.model.LoadoutSyncPayload;
 import com.mystix.model.LootDropPayload;
 import com.mystix.model.LootSyncPayload;
@@ -45,6 +46,7 @@ public class MystixApiClient
 	private static final String TIMERS_ENDPOINT = "/api/runelite/timers/";
 	private static final String SKILLS_ENDPOINT = "/api/runelite/skills/";
 	private static final String BANK_ENDPOINT = "/api/runelite/bank/";
+	private static final String COLLECTION_LOG_ENDPOINT = "/api/runelite/collection-log/";
 	private static final String LOADOUT_ENDPOINT = "/api/runelite/loadouts/";
 	private static final String LOOT_ENDPOINT = "/api/runelite/loot/";
 	private static final String LOOT_DROP_ENDPOINT = "/api/runelite/loot/drop/";
@@ -102,6 +104,13 @@ public class MystixApiClient
 		postAsync(BANK_ENDPOINT, payload.toJson(gson), "bank", false, true,
 			() -> log.debug("Mystix bank sync successful: {} items for player: {}",
 				payload.getTotalItemCount(), payload.getPlayerUsername()));
+	}
+
+	public void sendCollectionLogSync(CollectionLogSyncPayload payload)
+	{
+		postAsync(COLLECTION_LOG_ENDPOINT, payload.toJson(gson), "collection-log", false, true,
+			() -> log.debug("Mystix collection log sync successful: {} items for player: {}",
+				payload.getItemCount(), payload.getPlayerUsername()));
 	}
 
 	public void sendLootSync(LootSyncPayload payload)
