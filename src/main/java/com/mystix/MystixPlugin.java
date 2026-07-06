@@ -14,6 +14,7 @@ import net.runelite.api.events.ChatMessage;
 import net.runelite.api.events.GameStateChanged;
 import net.runelite.client.Notifier;
 import net.runelite.client.config.ConfigManager;
+import net.runelite.client.events.ConfigChanged;
 import net.runelite.client.eventbus.EventBus;
 import net.runelite.client.eventbus.Subscribe;
 import net.runelite.client.game.ItemManager;
@@ -228,6 +229,26 @@ public class MystixPlugin extends Plugin {
 			executorService.schedule(
 					this::loadRoadmapQuietly, 8, java.util.concurrent.TimeUnit.SECONDS);
 		}
+	}
+
+	/**
+	 * Fires a full re-sync the moment a complete App Key is entered while the
+	 * player is already logged in. The per-monitor login syncs only run on the
+	 * login transition, so users who paste their key mid-session would otherwise
+	 * see nothing sync until their next login. Gated on a minimum key length so we
+	 * don't fire on partial edits, and on being logged in (at the login screen the
+	 * normal login sync already covers it).
+	 */
+	@Subscribe
+	public void onConfigChanged(ConfigChanged event) {
+		if (!SyncGuard.isCompleteAppKeyEntry(event.getGroup(), event.getKey(), event.getNewValue())) {
+			return;
+		}
+		if (client.getGameState() != GameState.LOGGED_IN) {
+			return;
+		}
+		log.debug("Mystix App Key entered while logged in; running full sync");
+		forceSyncAll();
 	}
 
 	/**

@@ -4,9 +4,12 @@ import net.runelite.client.config.Config;
 import net.runelite.client.config.ConfigGroup;
 import net.runelite.client.config.ConfigItem;
 
-@ConfigGroup("mystix")
+@ConfigGroup(MystixConfig.CONFIG_GROUP)
 public interface MystixConfig extends Config {
-	@ConfigItem(keyName = "mystixAppKey", name = "Mystix App Key", description = "API key for authenticating with Mystix. Get this from the Mystix app after installing this plugin.", position = 0, secret = true)
+	String CONFIG_GROUP = "mystix";
+	String APP_KEY = "mystixAppKey";
+
+	@ConfigItem(keyName = APP_KEY, name = "Mystix App Key", description = "API key for authenticating with Mystix. Get this from the Mystix app after installing this plugin.", position = 0, secret = true)
 	default String mystixAppKey() {
 		return "";
 	}
