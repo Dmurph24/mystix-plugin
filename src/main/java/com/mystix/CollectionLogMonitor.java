@@ -5,9 +5,10 @@ import com.mystix.api.MystixApiClient;
 import com.mystix.model.CollectionLogSyncPayload;
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.HashSet;
+import java.util.HashMap;
 import java.util.List;
-import java.util.Set;
+import java.util.Map;
+import java.util.TreeMap;
 import javax.inject.Inject;
 import javax.inject.Singleton;
 import lombok.extern.slf4j.Slf4j;
@@ -30,9 +31,11 @@ import net.runelite.client.eventbus.Subscribe;
  * So the first time the player opens their collection log each session we replicate
  * WikiSync's technique: trigger the in-log "search" ({@link #SEARCH_SCRIPT}), which
  * forces the draw script ({@link #DRAW_SCRIPT}) to fire for every obtained item.
- * We collect those item IDs and push them. After that, {@link #DRAW_SCRIPT} keeps
- * firing for new-item unlocks, so incremental obtains flow in real time. A final
- * deduped sync runs on logout. No manual button, no per-page clicking.
+ * Each fire carries the item id and its obtained quantity on the argument stack
+ * (args[1] and args[2]), so we collect both and push them. After that,
+ * {@link #DRAW_SCRIPT} keeps firing for new-item unlocks, so incremental obtains
+ * flow in real time. A final deduped sync runs on logout. No manual button, no
+ * per-page clicking.
  */
 @Slf4j
 @Singleton
@@ -52,7 +55,9 @@ public class CollectionLogMonitor {
 	private final MystixApiClient apiClient;
 	private final Gson gson;
 
-	private final Set<Integer> obtainedItemIds = new HashSet<>();
+	// Obtained item id -> its in-game obtained quantity, captured from the draw
+	// script (args[1] = item id, args[2] = quantity).
+	private final Map<Integer, Integer> obtainedQuantityByItemId = new HashMap<>();
 	private GameState previousGameState = GameState.UNKNOWN;
 	private boolean captureActive;
 	private boolean fullReadTriggeredThisSession;
@@ -141,9 +146,9 @@ public class CollectionLogMonitor {
 	}
 
 	/**
-	 * Each obtained item the collection log draws fires this script with the item
-	 * id on the argument stack. Captures both the full-read burst and single-item
-	 * real-time unlocks.
+	 * Each obtained item the collection log draws fires this script with the item id
+	 * (args[1]) and its obtained quantity (args[2]) on the argument stack. Captures
+	 * both the full-read burst and single-item real-time unlocks.
 	 */
 	@Subscribe
 	public void onScriptPreFired(ScriptPreFired event) {
@@ -154,7 +159,9 @@ public class CollectionLogMonitor {
 		if (args == null || args.length < 2 || !(args[1] instanceof Integer)) {
 			return;
 		}
-		obtainedItemIds.add((Integer) args[1]);
+		int itemId = (Integer) args[1];
+		int quantity = args.length > 2 && args[2] instanceof Integer ? (Integer) args[2] : 0;
+		obtainedQuantityByItemId.put(itemId, quantity);
 		tickScriptFired = client.getTickCount();
 	}
 
@@ -185,13 +192,16 @@ public class CollectionLogMonitor {
 			return;
 		}
 		String playerUsername = SyncGuard.getPlayerUsername(client);
-		if (playerUsername == null || obtainedItemIds.isEmpty()) {
+		if (playerUsername == null || obtainedQuantityByItemId.isEmpty()) {
 			return;
 		}
 
-		List<Integer> sortedIds = new ArrayList<>(obtainedItemIds);
+		List<Integer> sortedIds = new ArrayList<>(obtainedQuantityByItemId.keySet());
 		Collections.sort(sortedIds);
-		CollectionLogSyncPayload payload = new CollectionLogSyncPayload(playerUsername, sortedIds);
+		// TreeMap gives a stable JSON key order so the dedup check is reliable.
+		Map<Integer, Integer> quantities = new TreeMap<>(obtainedQuantityByItemId);
+		CollectionLogSyncPayload payload =
+				new CollectionLogSyncPayload(playerUsername, sortedIds, quantities);
 		String json = payload.toJson(gson);
 
 		if (json.equals(lastSyncJson)) {
@@ -204,7 +214,7 @@ public class CollectionLogMonitor {
 	}
 
 	private void resetSessionState() {
-		obtainedItemIds.clear();
+		obtainedQuantityByItemId.clear();
 		captureActive = false;
 		fullReadTriggeredThisSession = false;
 		tickScriptFired = -1;
