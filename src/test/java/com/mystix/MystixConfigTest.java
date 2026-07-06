@@ -33,6 +33,13 @@ public class MystixConfigTest
 	}
 
 	@Test
+	public void testDefaultSyncCombatAchievementsIsTrue()
+	{
+		TestMystixConfig config = new TestMystixConfig();
+		assertTrue(config.syncCombatAchievements());
+	}
+
+	@Test
 	public void testDefaultShowNextGoalIsFalse()
 	{
 		// The overlay is opt-in; off by default.
