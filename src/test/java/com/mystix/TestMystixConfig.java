@@ -9,6 +9,7 @@ public class TestMystixConfig implements MystixConfig {
 	private boolean syncBankMemory = true;
 	private boolean syncCollectionLog = true;
 	private boolean syncQuests = true;
+	private boolean syncAchievementDiaries = true;
 	private boolean showNextGoal = false;
 
 	@Override
@@ -37,6 +38,11 @@ public class TestMystixConfig implements MystixConfig {
 	}
 
 	@Override
+	public boolean syncAchievementDiaries() {
+		return syncAchievementDiaries;
+	}
+
+	@Override
 	public boolean showNextGoal() {
 		return showNextGoal;
 	}
@@ -59,6 +65,10 @@ public class TestMystixConfig implements MystixConfig {
 
 	public void setSyncQuests(boolean value) {
 		this.syncQuests = value;
+	}
+
+	public void setSyncAchievementDiaries(boolean value) {
+		this.syncAchievementDiaries = value;
 	}
 
 	public void setShowNextGoal(boolean value) {
