@@ -26,6 +26,13 @@ public class MystixConfigTest
 	}
 
 	@Test
+	public void testDefaultSyncQuestsIsTrue()
+	{
+		TestMystixConfig config = new TestMystixConfig();
+		assertTrue(config.syncQuests());
+	}
+
+	@Test
 	public void testDefaultShowNextGoalIsFalse()
 	{
 		// The overlay is opt-in; off by default.
