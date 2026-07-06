@@ -4,6 +4,7 @@ import com.google.gson.Gson;
 import com.google.gson.JsonSyntaxException;
 import com.mystix.MystixConfig;
 import com.mystix.SyncGuard;
+import com.mystix.model.AchievementDiariesSyncPayload;
 import com.mystix.model.BankSyncPayload;
 import com.mystix.model.CollectionLogSyncPayload;
 import com.mystix.model.LoadoutSyncPayload;
@@ -49,6 +50,7 @@ public class MystixApiClient
 	private static final String BANK_ENDPOINT = "/api/runelite/bank/";
 	private static final String COLLECTION_LOG_ENDPOINT = "/api/runelite/collection-log/";
 	private static final String QUESTS_ENDPOINT = "/api/runelite/quests/";
+	private static final String ACHIEVEMENT_DIARIES_ENDPOINT = "/api/runelite/achievement-diaries/";
 	private static final String LOADOUT_ENDPOINT = "/api/runelite/loadouts/";
 	private static final String LOOT_ENDPOINT = "/api/runelite/loot/";
 	private static final String LOOT_DROP_ENDPOINT = "/api/runelite/loot/drop/";
@@ -120,6 +122,13 @@ public class MystixApiClient
 		postAsync(QUESTS_ENDPOINT, payload.toJson(gson), "quests", false, true,
 			() -> log.debug("Mystix quests sync successful: {} quests for player: {}",
 				payload.getQuests().size(), payload.getPlayerUsername()));
+	}
+
+	public void sendAchievementDiariesSync(AchievementDiariesSyncPayload payload)
+	{
+		postAsync(ACHIEVEMENT_DIARIES_ENDPOINT, payload.toJson(gson), "achievement-diaries", false, true,
+			() -> log.debug("Mystix achievement diaries sync successful: {} regions for player: {}",
+				payload.getAchievementDiaries().size(), payload.getPlayerUsername()));
 	}
 
 	public void sendLootSync(LootSyncPayload payload)

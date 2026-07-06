@@ -41,7 +41,12 @@ public interface MystixConfig extends Config {
 		return true;
 	}
 
-	@ConfigItem(keyName = "showNextGoal", name = "Show current goal overlay", description = "Show your current (next uncompleted) goal from the selected roadmap as an overlay in the game window.", position = 7)
+	@ConfigItem(keyName = "syncAchievementDiaries", name = "Achievement Diaries", description = "Sync your achievement diary completion to Mystix. Reads on login and updates in real time as you complete diary tasks.", position = 7)
+	default boolean syncAchievementDiaries() {
+		return true;
+	}
+
+	@ConfigItem(keyName = "showNextGoal", name = "Show current goal overlay", description = "Show your current (next uncompleted) goal from the selected roadmap as an overlay in the game window.", position = 8)
 	default boolean showNextGoal() {
 		return true;
 	}
