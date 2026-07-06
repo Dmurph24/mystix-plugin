@@ -10,6 +10,7 @@ import com.mystix.model.LoadoutSyncPayload;
 import com.mystix.model.LootDropPayload;
 import com.mystix.model.LootSyncPayload;
 import com.mystix.model.PlayerSkillsSyncPayload;
+import com.mystix.model.QuestsSyncPayload;
 import com.mystix.model.Roadmap;
 import com.mystix.model.RoadmapList;
 import com.mystix.model.TimerSyncItem;
@@ -47,6 +48,7 @@ public class MystixApiClient
 	private static final String SKILLS_ENDPOINT = "/api/runelite/skills/";
 	private static final String BANK_ENDPOINT = "/api/runelite/bank/";
 	private static final String COLLECTION_LOG_ENDPOINT = "/api/runelite/collection-log/";
+	private static final String QUESTS_ENDPOINT = "/api/runelite/quests/";
 	private static final String LOADOUT_ENDPOINT = "/api/runelite/loadouts/";
 	private static final String LOOT_ENDPOINT = "/api/runelite/loot/";
 	private static final String LOOT_DROP_ENDPOINT = "/api/runelite/loot/drop/";
@@ -111,6 +113,13 @@ public class MystixApiClient
 		postAsync(COLLECTION_LOG_ENDPOINT, payload.toJson(gson), "collection-log", false, true,
 			() -> log.debug("Mystix collection log sync successful: {} items for player: {}",
 				payload.getItemCount(), payload.getPlayerUsername()));
+	}
+
+	public void sendQuestsSync(QuestsSyncPayload payload)
+	{
+		postAsync(QUESTS_ENDPOINT, payload.toJson(gson), "quests", false, true,
+			() -> log.debug("Mystix quests sync successful: {} quests for player: {}",
+				payload.getQuests().size(), payload.getPlayerUsername()));
 	}
 
 	public void sendLootSync(LootSyncPayload payload)

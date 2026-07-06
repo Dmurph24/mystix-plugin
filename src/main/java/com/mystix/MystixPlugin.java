@@ -30,7 +30,7 @@ import com.mystix.runelite.farming.FarmingWorld;
 import com.mystix.runelite.farming.PaymentTracker;
 
 @Slf4j
-@PluginDescriptor(name = "Mystix", description = "Syncs Farming Timers, Bank, Skills, Loadout, Loot, and Collection Log data to the Mystix mobile app.")
+@PluginDescriptor(name = "Mystix", description = "Syncs Farming Timers, Bank, Skills, Loadout, Loot, Collection Log, and Quest data to the Mystix mobile app.")
 public class MystixPlugin extends Plugin {
 	private static final String TEARS_CAVE_MESSAGE = "Your stories have entertained me. I will let you into the cave for a short time.";
 
@@ -62,6 +62,9 @@ public class MystixPlugin extends Plugin {
 
 	@Inject
 	private CollectionLogMonitor collectionLogMonitor;
+
+	@Inject
+	private QuestMonitor questMonitor;
 
 	@Inject
 	private EventBus eventBus;
@@ -127,6 +130,7 @@ public class MystixPlugin extends Plugin {
 		eventBus.register(loadoutMonitor);
 		eventBus.register(lootMonitor);
 		eventBus.register(collectionLogMonitor);
+		eventBus.register(questMonitor);
 
 		timerMonitor.start();
 		lootMonitor.start();
@@ -157,6 +161,7 @@ public class MystixPlugin extends Plugin {
 		eventBus.unregister(loadoutMonitor);
 		eventBus.unregister(lootMonitor);
 		eventBus.unregister(collectionLogMonitor);
+		eventBus.unregister(questMonitor);
 
 		timerMonitor.stop();
 		playerSkillsMonitor.stop();
@@ -166,6 +171,7 @@ public class MystixPlugin extends Plugin {
 		loadoutMonitor.stop();
 		lootMonitor.stop();
 		collectionLogMonitor.stop();
+		questMonitor.stop();
 
 		if (navButton != null) {
 			clientToolbar.removeNavigation(navButton);
@@ -194,6 +200,7 @@ public class MystixPlugin extends Plugin {
 		loadoutMonitor.forceSync();
 		lootMonitor.forceSync();
 		collectionLogMonitor.forceSync();
+		questMonitor.forceSync();
 	}
 
 	@Subscribe
