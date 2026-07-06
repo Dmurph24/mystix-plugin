@@ -7,6 +7,7 @@ import com.mystix.SyncGuard;
 import com.mystix.model.AchievementDiariesSyncPayload;
 import com.mystix.model.BankSyncPayload;
 import com.mystix.model.CollectionLogSyncPayload;
+import com.mystix.model.CombatAchievementsSyncPayload;
 import com.mystix.model.LoadoutSyncPayload;
 import com.mystix.model.LootDropPayload;
 import com.mystix.model.LootSyncPayload;
@@ -51,6 +52,7 @@ public class MystixApiClient
 	private static final String COLLECTION_LOG_ENDPOINT = "/api/runelite/collection-log/";
 	private static final String QUESTS_ENDPOINT = "/api/runelite/quests/";
 	private static final String ACHIEVEMENT_DIARIES_ENDPOINT = "/api/runelite/achievement-diaries/";
+	private static final String COMBAT_ACHIEVEMENTS_ENDPOINT = "/api/runelite/combat-achievements/";
 	private static final String LOADOUT_ENDPOINT = "/api/runelite/loadouts/";
 	private static final String LOOT_ENDPOINT = "/api/runelite/loot/";
 	private static final String LOOT_DROP_ENDPOINT = "/api/runelite/loot/drop/";
@@ -129,6 +131,13 @@ public class MystixApiClient
 		postAsync(ACHIEVEMENT_DIARIES_ENDPOINT, payload.toJson(gson), "achievement-diaries", false, true,
 			() -> log.debug("Mystix achievement diaries sync successful: {} regions for player: {}",
 				payload.getAchievementDiaries().size(), payload.getPlayerUsername()));
+	}
+
+	public void sendCombatAchievementsSync(CombatAchievementsSyncPayload payload)
+	{
+		postAsync(COMBAT_ACHIEVEMENTS_ENDPOINT, payload.toJson(gson), "combat-achievements", false, true,
+			() -> log.debug("Mystix combat achievements sync successful: {} tasks for player: {}",
+				payload.getCombatAchievements().size(), payload.getPlayerUsername()));
 	}
 
 	public void sendLootSync(LootSyncPayload payload)
