@@ -34,6 +34,10 @@ import javax.swing.JComponent;
 import javax.swing.JLabel;
 import javax.swing.JOptionPane;
 import javax.swing.JPanel;
+import javax.swing.JScrollPane;
+import javax.swing.ScrollPaneConstants;
+import javax.swing.Scrollable;
+import javax.swing.SwingConstants;
 import javax.swing.SwingUtilities;
 import lombok.extern.slf4j.Slf4j;
 import net.runelite.client.ui.ColorScheme;
@@ -98,7 +102,19 @@ public class RoadmapPanel extends PluginPanel {
 
 		goalsPanel.setLayout(new BoxLayout(goalsPanel, BoxLayout.Y_AXIS));
 		goalsPanel.setBackground(ColorScheme.DARK_GRAY_COLOR);
-		add(goalsPanel, BorderLayout.CENTER);
+
+		// Scroll the goals list on its own. Without this, a roadmap with many goals
+		// makes the panel's preferred/minimum height grow to fit every row, which
+		// forces the RuneLite window taller than the screen and stops it shrinking
+		// back. The header and footer stay pinned; only this list scrolls.
+		JScrollPane goalsScroll = new JScrollPane(
+				goalsPanel,
+				ScrollPaneConstants.VERTICAL_SCROLLBAR_AS_NEEDED,
+				ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER);
+		goalsScroll.setBorder(BorderFactory.createEmptyBorder());
+		goalsScroll.getViewport().setBackground(ColorScheme.DARK_GRAY_COLOR);
+		goalsScroll.getVerticalScrollBar().setUnitIncrement(16);
+		add(goalsScroll, BorderLayout.CENTER);
 
 		add(buildFooterNote(), BorderLayout.SOUTH);
 	}
@@ -596,11 +612,42 @@ public class RoadmapPanel extends PluginPanel {
 	 * right of the gutters), and verticals extend by {@link #ROW_GAP} to bridge
 	 * the strut between rows so a branch reads as one continuous line.
 	 */
-	private static final class GoalsTreePanel extends JPanel {
+	private static final class GoalsTreePanel extends JPanel implements Scrollable {
 		private List<RowGuide> rowGuides = Collections.emptyList();
 
 		void setRowGuides(List<RowGuide> rowGuides) {
 			this.rowGuides = rowGuides;
+		}
+
+		@Override
+		public Dimension getPreferredScrollableViewportSize() {
+			// Report no intrinsic viewport size so the enclosing scroll pane never
+			// inflates this panel's preferred height to the full goal-list height —
+			// that inflation is what pushed the client window past the screen.
+			return new Dimension(0, 0);
+		}
+
+		@Override
+		public int getScrollableUnitIncrement(Rectangle visibleRect, int orientation, int direction) {
+			return 16;
+		}
+
+		@Override
+		public int getScrollableBlockIncrement(Rectangle visibleRect, int orientation, int direction) {
+			return orientation == SwingConstants.VERTICAL ? visibleRect.height : visibleRect.width;
+		}
+
+		@Override
+		public boolean getScrollableTracksViewportWidth() {
+			// Track the viewport width so goal names keep wrapping and no horizontal
+			// scrollbar is ever needed.
+			return true;
+		}
+
+		@Override
+		public boolean getScrollableTracksViewportHeight() {
+			// Let the panel grow taller than the viewport so the list scrolls.
+			return false;
 		}
 
 		@Override
