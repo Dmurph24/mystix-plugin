@@ -12,6 +12,7 @@ import com.mystix.model.KillCountsSyncPayload;
 import com.mystix.model.LoadoutSyncPayload;
 import com.mystix.model.LootDropPayload;
 import com.mystix.model.LootSyncPayload;
+import com.mystix.model.SlayerSyncPayload;
 import com.mystix.model.PlayerSkillsSyncPayload;
 import com.mystix.model.QuestsSyncPayload;
 import com.mystix.model.Roadmap;
@@ -59,6 +60,7 @@ public class MystixApiClient
 	private static final String LOOT_ENDPOINT = "/api/runelite/loot/";
 	private static final String LOOT_DROP_ENDPOINT = "/api/runelite/loot/drop/";
 	private static final String ROADMAPS_ENDPOINT = "/api/runelite/roadmaps/";
+	private static final String SLAYER_ENDPOINT = "/api/runelite/slayer/";
 
 	private static final int HTTP_OK_MIN = 200;
 	private static final int HTTP_OK_MAX = 300;
@@ -147,6 +149,25 @@ public class MystixApiClient
 		postAsync(KILL_COUNTS_ENDPOINT, payload.toJson(gson), "kill-counts", false, true,
 			() -> log.debug("Mystix kill counts sync successful: {} bosses for player: {}",
 				payload.getKillCounts().size(), payload.getPlayerUsername()));
+	}
+
+	/**
+	 * Syncs slayer state + task transition events. Dedupe is disabled: the
+	 * payload carries pending events whose delivery must not be skipped just
+	 * because the state half is unchanged; the backend is idempotent on
+	 * event_uuid instead.
+	 */
+	public void sendSlayerSync(SlayerSyncPayload payload, Runnable onSuccess)
+	{
+		postAsync(SLAYER_ENDPOINT, payload.toJson(gson), "slayer", false, false,
+			() -> {
+				log.debug("Mystix slayer sync successful: {} events for player: {}",
+					payload.getEvents().size(), payload.getPlayerUsername());
+				if (onSuccess != null)
+				{
+					onSuccess.run();
+				}
+			});
 	}
 
 	public void sendLootSync(LootSyncPayload payload)
