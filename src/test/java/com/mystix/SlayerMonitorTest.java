@@ -89,6 +89,18 @@ public class SlayerMonitorTest {
 	}
 
 	@Test
+	public void testBlockListDecodesPackedBytes() {
+		// Live-captured varp values: 424696191 packs Blue dragons (25), Cave
+		// horrors (80), Spiritual creatures (89), Metal dragons (127), which
+		// matched the four blocked rows in the rewards-interface scrape.
+		SlayerMonitor.Snapshot s = new SlayerMonitor.Snapshot();
+		s.blockList = java.util.List.of(0, 0, 4784128, 0, 424696191);
+		java.util.Set<Integer> ids = s.decodedBlockIds();
+		assertTrue(ids.containsAll(java.util.List.of(25, 80, 89, 127, 73)));
+		assertFalse(ids.contains(0));
+	}
+
+	@Test
 	public void testStreakAdvanceWinsOverBlockFlag() {
 		// If both fire in one coalesced window, completion (authoritative
 		// streak) outranks the block corroboration.
