@@ -59,6 +59,11 @@ public interface MystixConfig extends Config {
 		return true;
 	}
 
+	@ConfigItem(keyName = "syncSlayer", name = "Slayer", description = "Sync your slayer task, points, streak, block list and unlocks to Mystix. Reads on login and updates as tasks progress.", position = 11)
+	default boolean syncSlayer() {
+		return true;
+	}
+
 	@ConfigItem(keyName = "showNextGoal", name = "Show current goal overlay", description = "Show your current (next uncompleted) goal from the selected roadmap as an overlay in the game window.", position = 10)
 	default boolean showNextGoal() {
 		return true;
