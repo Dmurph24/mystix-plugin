@@ -130,6 +130,26 @@ public class SlayerMonitor {
 			return amountRemaining > 0 && (taskId != null && taskId != 0);
 		}
 
+		/**
+		 * Blocked task ids, decoded from the raw block varps. Each varp packs
+		 * up to four ids as bytes (verified live: one varp held Blue dragons /
+		 * Cave horrors / Spiritual creatures / Metal dragons as 25|80|89|127).
+		 * The raw values still go to the server unchanged; this decode exists
+		 * only for the membership check in transition detection.
+		 */
+		java.util.Set<Integer> decodedBlockIds() {
+			java.util.Set<Integer> ids = new java.util.HashSet<>();
+			for (int raw : blockList) {
+				for (int shift = 0; shift <= 24; shift += 8) {
+					int id = (raw >> shift) & 0xFF;
+					if (id != 0) {
+						ids.add(id);
+					}
+				}
+			}
+			return ids;
+		}
+
 		/** Task identity, ignoring progress. Boss tasks differ by sublist id. */
 		boolean sameTask(Snapshot other) {
 			return java.util.Objects.equals(taskId, other.taskId)
@@ -332,9 +352,11 @@ public class SlayerMonitor {
 
 		boolean chatRecent = lastCompletionChatTick != -1
 				&& client.getTickCount() - lastCompletionChatTick <= CHAT_ATTACH_WINDOW_TICKS;
+		// Membership is checked on the byte-decoded ids, and as a before/after
+		// delta so stray non-block bytes in these varps can't false-positive.
 		boolean blockListGained = before.taskId != null
-				&& !before.blockList.contains(before.taskId)
-				&& now.blockList.contains(before.taskId);
+				&& !before.decodedBlockIds().contains(before.taskId)
+				&& now.decodedBlockIds().contains(before.taskId);
 
 		String outcome = claimOutcome(
 				before.streak, now.streak,
