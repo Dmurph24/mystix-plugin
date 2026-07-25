@@ -80,6 +80,12 @@ public class MystixPlugin extends Plugin {
 	private SlayerMonitor slayerMonitor;
 
 	@Inject
+	private SlayerCatalogMonitor slayerCatalogMonitor;
+
+	@Inject
+	private SlayerRewardsMonitor slayerRewardsMonitor;
+
+	@Inject
 	private EventBus eventBus;
 
 	@Inject
@@ -148,6 +154,8 @@ public class MystixPlugin extends Plugin {
 		eventBus.register(combatAchievementMonitor);
 		eventBus.register(killCountMonitor);
 		eventBus.register(slayerMonitor);
+		eventBus.register(slayerCatalogMonitor);
+		eventBus.register(slayerRewardsMonitor);
 
 		timerMonitor.start();
 		lootMonitor.start();
@@ -183,6 +191,8 @@ public class MystixPlugin extends Plugin {
 		eventBus.unregister(combatAchievementMonitor);
 		eventBus.unregister(killCountMonitor);
 		eventBus.unregister(slayerMonitor);
+		eventBus.unregister(slayerCatalogMonitor);
+		eventBus.unregister(slayerRewardsMonitor);
 
 		timerMonitor.stop();
 		playerSkillsMonitor.stop();
@@ -197,6 +207,8 @@ public class MystixPlugin extends Plugin {
 		combatAchievementMonitor.stop();
 		killCountMonitor.stop();
 		slayerMonitor.stop();
+		slayerCatalogMonitor.stop();
+		slayerRewardsMonitor.stop();
 
 		if (navButton != null) {
 			clientToolbar.removeNavigation(navButton);
@@ -230,6 +242,7 @@ public class MystixPlugin extends Plugin {
 		combatAchievementMonitor.forceSync();
 		killCountMonitor.forceSync();
 		slayerMonitor.forceSync();
+		slayerCatalogMonitor.forceSync();
 	}
 
 	@Subscribe
