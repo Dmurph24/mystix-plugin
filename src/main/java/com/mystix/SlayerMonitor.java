@@ -234,6 +234,9 @@ public class SlayerMonitor {
 	private long pendingZeroMs;
 
 	private void recordKill(long nowMs) {
+		if (previous != null && previous.hasTask()) {
+			timingTaskKey = taskKey(previous);
+		}
 		if (firstKillMs == 0) {
 			firstKillMs = nowMs;
 		} else if (nowMs - lastKillMs <= ACTIVE_GAP_CAP_MS) {
@@ -244,6 +247,7 @@ public class SlayerMonitor {
 	}
 
 	private void resetTiming() {
+		timingTaskKey = 0;
 		firstKillMs = 0;
 		lastKillMs = 0;
 		activeMs = 0;
@@ -251,15 +255,31 @@ public class SlayerMonitor {
 		configManager.unsetRSProfileConfiguration("mystix", TIMING_CONFIG_KEY);
 	}
 
+	private long timingTaskKey;
+
+	/** Identity key for timing ownership: task id + boss sublist id. */
+	private static long taskKey(Snapshot s) {
+		long task = s.taskId == null ? 0 : s.taskId;
+		long boss = s.bossTaskId == null ? 0 : s.bossTaskId;
+		return (task << 32) | boss;
+	}
+
 	private void persistTiming() {
 		Map<String, Long> stored = new LinkedHashMap<>();
+		stored.put("task", timingTaskKey);
 		stored.put("first", firstKillMs);
 		stored.put("last", lastKillMs);
 		stored.put("active", activeMs);
 		configManager.setRSProfileConfiguration("mystix", TIMING_CONFIG_KEY, gson.toJson(stored));
 	}
 
-	private void restoreTiming() {
+	/**
+	 * Restores persisted timing, but only when it belongs to the task the
+	 * session actually has: the task can change while the plugin is not
+	 * running (finished or skipped on another client), and stale timing must
+	 * not attach to the new assignment.
+	 */
+	private void restoreTiming(Snapshot now) {
 		String stored = configManager.getRSProfileConfiguration("mystix", TIMING_CONFIG_KEY);
 		if (stored == null || stored.isEmpty()) {
 			return;
@@ -267,11 +287,19 @@ public class SlayerMonitor {
 		try {
 			Map<String, Double> parsed = gson.fromJson(
 					stored, new TypeToken<Map<String, Double>>() { }.getType());
-			if (parsed != null) {
-				firstKillMs = parsed.getOrDefault("first", 0.0).longValue();
-				lastKillMs = parsed.getOrDefault("last", 0.0).longValue();
-				activeMs = parsed.getOrDefault("active", 0.0).longValue();
+			if (parsed == null) {
+				return;
 			}
+			long storedKey = parsed.getOrDefault("task", 0.0).longValue();
+			if (!now.hasTask() || storedKey != taskKey(now)) {
+				log.debug("Discarding slayer timing for a different task");
+				resetTiming();
+				return;
+			}
+			timingTaskKey = storedKey;
+			firstKillMs = parsed.getOrDefault("first", 0.0).longValue();
+			lastKillMs = parsed.getOrDefault("last", 0.0).longValue();
+			activeMs = parsed.getOrDefault("active", 0.0).longValue();
 		} catch (RuntimeException e) {
 			log.warn("Discarding unparseable slayer timing state", e);
 			resetTiming();
@@ -336,7 +364,6 @@ public class SlayerMonitor {
 			executorService.schedule(() -> clientThread.invokeLater(() -> {
 				previous = null; // don't fabricate a transition across sessions
 				restorePendingEvents();
-				restoreTiming();
 				readAndSync(true);
 			}), LOGIN_SYNC_DELAY_SECONDS, TimeUnit.SECONDS);
 		} else if (previousGameState == GameState.LOGGED_IN && newState != GameState.LOGGED_IN) {
@@ -428,6 +455,11 @@ public class SlayerMonitor {
 		}
 
 		Snapshot now = readSnapshot();
+		if (previous == null) {
+			// First read of the session: adopt persisted timing only if it
+			// belongs to this task.
+			restoreTiming(now);
+		}
 		detectTransition(previous, now);
 		boolean taskChanged = previous == null
 				|| previous.hasTask() != now.hasTask()
