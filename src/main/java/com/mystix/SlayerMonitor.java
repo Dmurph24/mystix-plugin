@@ -164,11 +164,21 @@ public class SlayerMonitor {
 			return ids;
 		}
 
-		/** Task identity, ignoring progress. Boss tasks differ by sublist id. */
+		/**
+		 * Task identity, ignoring progress. Boss tasks differ by sublist id.
+		 * The master is part of identity: a different master can reassign the
+		 * SAME monster in one interaction (task id unchanged, amount and
+		 * master varbit updated together), and without the master in the
+		 * comparison that transition is invisible: the old row never closes
+		 * and the skip goes unrecorded. The same master can never deal the
+		 * same monster back-to-back (the current task is excluded from the
+		 * assignment pool), so including it costs nothing.
+		 */
 		boolean sameTask(Snapshot other) {
 			return java.util.Objects.equals(taskId, other.taskId)
 					&& java.util.Objects.equals(bossTaskId, other.bossTaskId)
-					&& java.util.Objects.equals(areaId, other.areaId);
+					&& java.util.Objects.equals(areaId, other.areaId)
+					&& java.util.Objects.equals(masterId, other.masterId);
 		}
 	}
 
