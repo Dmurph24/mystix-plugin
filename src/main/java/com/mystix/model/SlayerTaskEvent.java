@@ -28,6 +28,9 @@ public class SlayerTaskEvent {
 	private final Boolean block_list_gained_task;
 	private final String assigned_at;
 	private final String ended_at;
+	private final String first_kill_at;
+	private final String last_kill_at;
+	private final Long active_seconds;
 
 	public SlayerTaskEvent(
 			String eventUuid,
@@ -47,7 +50,10 @@ public class SlayerTaskEvent {
 			String chatText,
 			Boolean blockListGainedTask,
 			String assignedAt,
-			String endedAt) {
+			String endedAt,
+			String firstKillAt,
+			String lastKillAt,
+			Long activeSeconds) {
 		this.event_uuid = eventUuid;
 		this.outcome = outcome;
 		this.task_id = taskId;
@@ -66,6 +72,9 @@ public class SlayerTaskEvent {
 		this.block_list_gained_task = blockListGainedTask;
 		this.assigned_at = assignedAt;
 		this.ended_at = endedAt;
+		this.first_kill_at = firstKillAt;
+		this.last_kill_at = lastKillAt;
+		this.active_seconds = activeSeconds;
 	}
 
 	public String getEventUuid() {
