@@ -55,6 +55,9 @@ public class SlayerCatalogMonitor {
 	private GameState previousGameState = GameState.UNKNOWN;
 	/** Hash already confirmed present server-side this session; skip re-checks. */
 	private String confirmedHash;
+	/** Cache revision whose dump was already confirmed; skips the ~1k table
+	 * probes a world hop would otherwise repeat. */
+	private int confirmedRevision = -1;
 
 	@Inject
 	public SlayerCatalogMonitor(
@@ -75,10 +78,12 @@ public class SlayerCatalogMonitor {
 	public void stop() {
 		previousGameState = GameState.UNKNOWN;
 		confirmedHash = null;
+		confirmedRevision = -1;
 	}
 
 	public void forceSync() {
 		confirmedHash = null;
+		confirmedRevision = -1;
 		clientThread.invokeLater(this::dumpAndUpload);
 	}
 
@@ -104,6 +109,9 @@ public class SlayerCatalogMonitor {
 		}
 		String playerUsername = SyncGuard.getPlayerUsername(client);
 		if (playerUsername == null) {
+			return;
+		}
+		if (client.getRevision() == confirmedRevision) {
 			return;
 		}
 
@@ -132,6 +140,7 @@ public class SlayerCatalogMonitor {
 			@Override
 			public void onSuccess(SlayerCatalogPayload.Status status) {
 				confirmedHash = hash;
+				confirmedRevision = client.getRevision();
 				if (status.isNeeded()) {
 					log.debug("Uploading slayer catalog (revision {}, {} tasks)",
 							revision, tables.get("slayer_task").size());

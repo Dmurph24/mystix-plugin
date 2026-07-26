@@ -54,7 +54,17 @@ public class SlayerRewardsMonitor {
 	private final MystixApiClient apiClient;
 	private final Gson gson;
 
-	private String lastSyncJson;
+	/** Minimum interval between scrape posts even when content changed. */
+	private static final long MIN_SCRAPE_INTERVAL_MS = 10_000L;
+
+	/**
+	 * Dedupe key of the last sent scrape: rows + master only. The payload's
+	 * captured_at is stamped per build, so comparing full payload JSON would
+	 * never match and every tab toggle in the rewards UI would post a full
+	 * snapshot.
+	 */
+	private String lastContentKey;
+	private long lastScrapeSentMs;
 
 	@Inject
 	public SlayerRewardsMonitor(
@@ -71,7 +81,8 @@ public class SlayerRewardsMonitor {
 	}
 
 	public void stop() {
-		lastSyncJson = null;
+		lastContentKey = null;
+		lastScrapeSentMs = 0;
 	}
 
 	@Subscribe
@@ -125,17 +136,23 @@ public class SlayerRewardsMonitor {
 		}
 
 		int masterId = client.getVarbitValue(VarbitID.SLAYER_MASTER);
+		String contentKey = masterId + "|" + gson.toJson(rows);
+		if (contentKey.equals(lastContentKey)) {
+			log.debug("Slayer rewards scrape unchanged, skipping sync");
+			return;
+		}
+		long nowMs = System.currentTimeMillis();
+		if (nowMs - lastScrapeSentMs < MIN_SCRAPE_INTERVAL_MS) {
+			log.debug("Slayer rewards scrape throttled");
+			return;
+		}
 		SlayerRewardsPayload payload = new SlayerRewardsPayload(
 				playerUsername,
 				masterId == 0 ? null : masterId,
 				rows,
 				Instant.now().toString());
-		String json = payload.toJson(gson);
-		if (json.equals(lastSyncJson)) {
-			log.debug("Slayer rewards scrape unchanged, skipping sync");
-			return;
-		}
-		lastSyncJson = json;
+		lastContentKey = contentKey;
+		lastScrapeSentMs = nowMs;
 		log.debug("Syncing slayer rewards scrape: {} rows for player: {}",
 				rows.size(), playerUsername);
 		apiClient.sendSlayerRewards(payload);
