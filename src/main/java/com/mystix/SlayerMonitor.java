@@ -71,6 +71,13 @@ public class SlayerMonitor {
 	 * waits briefly for trailing chat before it is built and sent.
 	 */
 	private static final int EVENT_FINALIZE_DELAY_TICKS = 3;
+	/**
+	 * Max gap between kills that still counts toward active grind time. Slow
+	 * tasks (on-task bosses, banking trips) have legitimate multi-minute gaps;
+	 * anything longer reads as a break and contributes nothing.
+	 */
+	private static final long ACTIVE_GAP_CAP_MS = 5 * 60_000L;
+	private static final String TIMING_CONFIG_KEY = "slayerTaskTiming";
 	/** SLAYER_TARGET value meaning "a boss task"; resolve via the sublist table. */
 	private static final int BOSS_TASK_SENTINEL = 98;
 	private static final String PENDING_EVENTS_CONFIG_KEY = "pendingSlayerEvents";
@@ -180,14 +187,25 @@ public class SlayerMonitor {
 		final boolean blockListGained;
 		final String assignedAt;
 		final int detectedTick;
+		// Timing captured at stage time, so a new assignment arriving during
+		// the grace window can't wipe it before the event is built.
+		final long firstKillMs;
+		final long lastKillMs;
+		final long activeMs;
+		final long pendingZeroMs;
 
 		PendingTransition(Snapshot before, Snapshot after, boolean blockListGained,
-				String assignedAt, int detectedTick) {
+				String assignedAt, int detectedTick,
+				long firstKillMs, long lastKillMs, long activeMs, long pendingZeroMs) {
 			this.before = before;
 			this.after = after;
 			this.blockListGained = blockListGained;
 			this.assignedAt = assignedAt;
 			this.detectedTick = detectedTick;
+			this.firstKillMs = firstKillMs;
+			this.lastKillMs = lastKillMs;
+			this.activeMs = activeMs;
+			this.pendingZeroMs = pendingZeroMs;
 		}
 	}
 
@@ -202,6 +220,67 @@ public class SlayerMonitor {
 	private int lastCompletionChatTick = -1;
 	private PendingTransition draft;
 	private final List<SlayerTaskEvent> pendingEvents = new ArrayList<>();
+
+	/**
+	 * Active-time tracking for the current task, fed by SLAYER_COUNT
+	 * decrements ("first monster kill to last", with AFK gaps capped out).
+	 * Persisted per profile so a task spanning sessions keeps its timing.
+	 */
+	private int lastCountSeen = -1;
+	private long firstKillMs;
+	private long lastKillMs;
+	private long activeMs;
+	/** Candidate final-kill moment: count hit 0, outcome not yet known. */
+	private long pendingZeroMs;
+
+	private void recordKill(long nowMs) {
+		if (firstKillMs == 0) {
+			firstKillMs = nowMs;
+		} else if (nowMs - lastKillMs <= ACTIVE_GAP_CAP_MS) {
+			activeMs += nowMs - lastKillMs;
+		}
+		lastKillMs = nowMs;
+		persistTiming();
+	}
+
+	private void resetTiming() {
+		firstKillMs = 0;
+		lastKillMs = 0;
+		activeMs = 0;
+		pendingZeroMs = 0;
+		configManager.unsetRSProfileConfiguration("mystix", TIMING_CONFIG_KEY);
+	}
+
+	private void persistTiming() {
+		Map<String, Long> stored = new LinkedHashMap<>();
+		stored.put("first", firstKillMs);
+		stored.put("last", lastKillMs);
+		stored.put("active", activeMs);
+		configManager.setRSProfileConfiguration("mystix", TIMING_CONFIG_KEY, gson.toJson(stored));
+	}
+
+	private void restoreTiming() {
+		String stored = configManager.getRSProfileConfiguration("mystix", TIMING_CONFIG_KEY);
+		if (stored == null || stored.isEmpty()) {
+			return;
+		}
+		try {
+			Map<String, Double> parsed = gson.fromJson(
+					stored, new TypeToken<Map<String, Double>>() { }.getType());
+			if (parsed != null) {
+				firstKillMs = parsed.getOrDefault("first", 0.0).longValue();
+				lastKillMs = parsed.getOrDefault("last", 0.0).longValue();
+				activeMs = parsed.getOrDefault("active", 0.0).longValue();
+			}
+		} catch (RuntimeException e) {
+			log.warn("Discarding unparseable slayer timing state", e);
+			resetTiming();
+		}
+	}
+
+	private static String isoOrNull(long epochMs) {
+		return epochMs == 0 ? null : Instant.ofEpochMilli(epochMs).toString();
+	}
 
 	@Inject
 	public SlayerMonitor(
@@ -232,6 +311,13 @@ public class SlayerMonitor {
 		lastCompletionChatText = null;
 		lastCompletionChatTick = -1;
 		draft = null;
+		// Zero in-memory timing but keep the persisted copy: a task spanning a
+		// client restart restores it on the next login.
+		lastCountSeen = -1;
+		firstKillMs = 0;
+		lastKillMs = 0;
+		activeMs = 0;
+		pendingZeroMs = 0;
 	}
 
 	/** Re-reads and re-pushes slayer state; clears the dedup cache. */
@@ -250,6 +336,7 @@ public class SlayerMonitor {
 			executorService.schedule(() -> clientThread.invokeLater(() -> {
 				previous = null; // don't fabricate a transition across sessions
 				restorePendingEvents();
+				restoreTiming();
 				readAndSync(true);
 			}), LOGIN_SYNC_DELAY_SECONDS, TimeUnit.SECONDS);
 		} else if (previousGameState == GameState.LOGGED_IN && newState != GameState.LOGGED_IN) {
@@ -273,9 +360,33 @@ public class SlayerMonitor {
 
 	@Subscribe
 	public void onVarbitChanged(VarbitChanged event) {
+		if (event.getVarpId() == VarPlayerID.SLAYER_COUNT) {
+			trackKillMoment(event.getValue());
+		}
 		if (WATCHED_VARPS.contains(event.getVarpId())
 				|| WATCHED_VARBITS.contains(event.getVarbitId())) {
 			checkPending = true;
+		}
+	}
+
+	/**
+	 * Feeds active-time tracking from SLAYER_COUNT changes. A decrement to a
+	 * positive value is kills landing; a drop to exactly 0 is either the final
+	 * kill or a cancel, so it is held as a candidate until the transition's
+	 * outcome is known. Increments (assignment, extend) only move the
+	 * reference value.
+	 */
+	private void trackKillMoment(int newValue) {
+		int prev = lastCountSeen;
+		lastCountSeen = newValue;
+		if (prev <= 0 || newValue >= prev) {
+			return;
+		}
+		long nowMs = System.currentTimeMillis();
+		if (newValue == 0) {
+			pendingZeroMs = nowMs;
+		} else {
+			recordKill(nowMs);
 		}
 	}
 
@@ -408,7 +519,9 @@ public class SlayerMonitor {
 				&& !before.decodedBlockIds().contains(before.taskId)
 				&& now.decodedBlockIds().contains(before.taskId);
 		draft = new PendingTransition(
-				before, now, blockListGained, currentTaskAssignedAt, client.getTickCount());
+				before, now, blockListGained, currentTaskAssignedAt, client.getTickCount(),
+				firstKillMs, lastKillMs, activeMs, pendingZeroMs);
+		resetTiming();
 		currentTaskAssignedAt = null;
 		log.debug("Slayer task transition staged: {}", before.taskName);
 	}
@@ -435,6 +548,18 @@ public class SlayerMonitor {
 		// the final kill (observed live: a completion closed with 1 remaining).
 		int amountAtEnd = "completed".equals(outcome) ? 0 : before.amountRemaining;
 
+		// The drop to 0 was the final kill only if the task completed; on a
+		// cancel it is just the varp clearing and contributes nothing.
+		long lastKill = draft.lastKillMs;
+		long active = draft.activeMs;
+		if ("completed".equals(outcome) && draft.pendingZeroMs > 0) {
+			if (lastKill > 0 && draft.pendingZeroMs - lastKill <= ACTIVE_GAP_CAP_MS) {
+				active += draft.pendingZeroMs - lastKill;
+			}
+			lastKill = draft.pendingZeroMs;
+		}
+		long first = draft.firstKillMs;
+
 		SlayerTaskEvent taskEvent = new SlayerTaskEvent(
 				UUID.randomUUID().toString(),
 				outcome,
@@ -453,7 +578,10 @@ public class SlayerMonitor {
 				chatRecent ? lastCompletionChatText : null,
 				draft.blockListGained,
 				draft.assignedAt,
-				Instant.now().toString());
+				Instant.now().toString(),
+				isoOrNull(first),
+				isoOrNull(lastKill),
+				first == 0 ? null : active / 1000);
 		pendingEvents.add(taskEvent);
 		persistPendingEvents();
 		lastCompletionChatTick = -1;
@@ -540,6 +668,9 @@ public class SlayerMonitor {
 				new LinkedHashMap<>(),
 				s.slayerLevel,
 				s.slayerXp,
+				isoOrNull(firstKillMs),
+				isoOrNull(lastKillMs),
+				firstKillMs == 0 ? null : activeMs / 1000,
 				Instant.now().toString());
 		return new SlayerSyncPayload(playerUsername, state, new ArrayList<>(pendingEvents));
 	}
