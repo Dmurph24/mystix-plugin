@@ -64,6 +64,13 @@ public class SlayerMonitor {
 	private static final long AMOUNT_SYNC_MIN_INTERVAL_MS = 60_000L;
 	/** How many ticks a completion chat line stays attachable to a transition. */
 	private static final int CHAT_ATTACH_WINDOW_TICKS = 10;
+	/**
+	 * Grace ticks between detecting a transition and finalizing its event. The
+	 * completion chat message can arrive a tick after the varp flips (observed
+	 * live: a real completion finalized with chat_matched=false), so the event
+	 * waits briefly for trailing chat before it is built and sent.
+	 */
+	private static final int EVENT_FINALIZE_DELAY_TICKS = 3;
 	/** SLAYER_TARGET value meaning "a boss task"; resolve via the sublist table. */
 	private static final int BOSS_TASK_SENTINEL = 98;
 	private static final String PENDING_EVENTS_CONFIG_KEY = "pendingSlayerEvents";
@@ -166,6 +173,24 @@ public class SlayerMonitor {
 	private final Gson gson;
 	private final ConfigManager configManager;
 
+	/** A detected transition waiting out the chat grace window. */
+	private static class PendingTransition {
+		final Snapshot before;
+		final Snapshot after;
+		final boolean blockListGained;
+		final String assignedAt;
+		final int detectedTick;
+
+		PendingTransition(Snapshot before, Snapshot after, boolean blockListGained,
+				String assignedAt, int detectedTick) {
+			this.before = before;
+			this.after = after;
+			this.blockListGained = blockListGained;
+			this.assignedAt = assignedAt;
+			this.detectedTick = detectedTick;
+		}
+	}
+
 	private GameState previousGameState = GameState.UNKNOWN;
 	private boolean checkPending;
 	private int lastReadTick = -1;
@@ -175,6 +200,7 @@ public class SlayerMonitor {
 	private String currentTaskAssignedAt;
 	private String lastCompletionChatText;
 	private int lastCompletionChatTick = -1;
+	private PendingTransition draft;
 	private final List<SlayerTaskEvent> pendingEvents = new ArrayList<>();
 
 	@Inject
@@ -205,6 +231,7 @@ public class SlayerMonitor {
 		currentTaskAssignedAt = null;
 		lastCompletionChatText = null;
 		lastCompletionChatTick = -1;
+		draft = null;
 	}
 
 	/** Re-reads and re-pushes slayer state; clears the dedup cache. */
@@ -254,6 +281,12 @@ public class SlayerMonitor {
 
 	@Subscribe
 	public void onGameTick(GameTick event) {
+		if (draft != null
+				&& client.getTickCount() - draft.detectedTick >= EVENT_FINALIZE_DELAY_TICKS) {
+			finalizeDraft();
+			readAndSync(false);
+			return;
+		}
 		if (!checkPending) {
 			return;
 		}
@@ -278,6 +311,11 @@ public class SlayerMonitor {
 			return;
 		}
 
+		if (force) {
+			// Logout/force flush: don't leave a transition waiting on chat.
+			finalizeDraft();
+		}
+
 		Snapshot now = readSnapshot();
 		detectTransition(previous, now);
 		boolean taskChanged = previous == null
@@ -287,6 +325,15 @@ public class SlayerMonitor {
 			currentTaskAssignedAt = Instant.now().toString();
 		}
 		previous = now;
+
+		if (draft != null && !force) {
+			// A transition is waiting out the chat grace window; the finalize
+			// pass in onGameTick sends everything together in a moment.
+			return;
+		}
+		if (force) {
+			finalizeDraft();
+		}
 
 		boolean amountWindowOpen =
 				System.currentTimeMillis() - lastAmountSyncMs >= AMOUNT_SYNC_MIN_INTERVAL_MS;
@@ -340,7 +387,7 @@ public class SlayerMonitor {
 		return s;
 	}
 
-	/** Detects a task ending/changing between snapshots and queues an event. */
+	/** Detects a task ending/changing between snapshots and stages a draft event. */
 	private void detectTransition(Snapshot before, Snapshot now) {
 		if (before == null || !before.hasTask()) {
 			return;
@@ -349,20 +396,44 @@ public class SlayerMonitor {
 		if (!ended) {
 			return;
 		}
+		if (draft != null) {
+			// A second transition before the first finalized (fast skip chain);
+			// close the first with whatever chat state exists now.
+			finalizeDraft();
+		}
 
-		boolean chatRecent = lastCompletionChatTick != -1
-				&& client.getTickCount() - lastCompletionChatTick <= CHAT_ATTACH_WINDOW_TICKS;
 		// Membership is checked on the byte-decoded ids, and as a before/after
 		// delta so stray non-block bytes in these varps can't false-positive.
 		boolean blockListGained = before.taskId != null
 				&& !before.decodedBlockIds().contains(before.taskId)
 				&& now.decodedBlockIds().contains(before.taskId);
+		draft = new PendingTransition(
+				before, now, blockListGained, currentTaskAssignedAt, client.getTickCount());
+		currentTaskAssignedAt = null;
+		log.debug("Slayer task transition staged: {}", before.taskName);
+	}
+
+	/** Builds and queues the event for the staged transition, if any. */
+	private void finalizeDraft() {
+		if (draft == null) {
+			return;
+		}
+		Snapshot before = draft.before;
+		Snapshot after = draft.after;
+		// The window spans both directions around the detection tick: chat can
+		// precede the varp flip or trail it by a tick or two (observed live: a
+		// real completion's message landed after detection and was missed).
+		boolean chatRecent = lastCompletionChatTick != -1
+				&& Math.abs(lastCompletionChatTick - draft.detectedTick) <= CHAT_ATTACH_WINDOW_TICKS;
 
 		String outcome = claimOutcome(
-				before.streak, now.streak,
-				before.wildernessStreak, now.wildernessStreak,
-				before.points, now.points,
-				chatRecent, blockListGained);
+				before.streak, after.streak,
+				before.wildernessStreak, after.wildernessStreak,
+				before.points, after.points,
+				chatRecent, draft.blockListGained);
+		// A completed task by definition reached 0; the before-snapshot can lag
+		// the final kill (observed live: a completion closed with 1 remaining).
+		int amountAtEnd = "completed".equals(outcome) ? 0 : before.amountRemaining;
 
 		SlayerTaskEvent taskEvent = new SlayerTaskEvent(
 				UUID.randomUUID().toString(),
@@ -373,21 +444,21 @@ public class SlayerMonitor {
 				before.areaId,
 				before.masterId,
 				before.amountOriginal,
-				before.amountRemaining,
+				amountAtEnd,
 				before.streak,
-				now.streak,
+				after.streak,
 				before.points,
-				now.points,
+				after.points,
 				chatRecent,
 				chatRecent ? lastCompletionChatText : null,
-				blockListGained,
-				currentTaskAssignedAt,
+				draft.blockListGained,
+				draft.assignedAt,
 				Instant.now().toString());
 		pendingEvents.add(taskEvent);
 		persistPendingEvents();
 		lastCompletionChatTick = -1;
 		lastCompletionChatText = null;
-		currentTaskAssignedAt = null;
+		draft = null;
 		log.debug("Slayer task transition: {} -> {}", taskEvent.getTaskName(), outcome);
 	}
 
