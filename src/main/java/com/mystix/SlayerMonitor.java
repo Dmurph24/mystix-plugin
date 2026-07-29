@@ -33,9 +33,11 @@ import net.runelite.api.events.GameStateChanged;
 import net.runelite.api.events.GameTick;
 import net.runelite.api.events.ScriptPostFired;
 import net.runelite.api.events.VarbitChanged;
+import net.runelite.api.events.WidgetLoaded;
 import net.runelite.api.gameval.DBTableID;
 import net.runelite.api.gameval.VarPlayerID;
 import net.runelite.api.gameval.VarbitID;
+import net.runelite.api.widgets.Widget;
 import net.runelite.client.callback.ClientThread;
 import net.runelite.client.config.ConfigManager;
 import net.runelite.client.eventbus.Subscribe;
@@ -83,6 +85,18 @@ public class SlayerMonitor {
 	/** SLAYER_TARGET value meaning "a boss task"; resolve via the sublist table. */
 	private static final int BOSS_TASK_SENTINEL = 98;
 	private static final String PENDING_EVENTS_CONFIG_KEY = "pendingSlayerEvents";
+	/**
+	 * Interface group of the slayer task-offer dialog (widget 15466499 =
+	 * group 236 child 3). Mortimer offers 2-3 tasks there, each with a name
+	 * row, an "Amount: N" row, and a modifier ("Mortifier") row carrying a
+	 * percent magnitude. The group may be shared with other dialogs, so
+	 * capture is gated on the parse finding offer-shaped rows, never on the
+	 * group alone.
+	 */
+	private static final int TASK_OFFER_GROUP = 236;
+	private static final int TASK_OFFER_CHILD = 3;
+	/** How long captured offers ride along in the state sync before expiring. */
+	private static final long OFFER_RETENTION_MS = 30 * 60_000L;
 	private static final String STORED_TASK_CONFIG_KEY = "storedSlayerTask";
 
 	/**
@@ -252,6 +266,9 @@ public class SlayerMonitor {
 	private String lastSyncJson;
 	private long lastAmountSyncMs;
 	private StoredTaskCapture storedTask;
+	private List<Map<String, Object>> pendingOffers = new ArrayList<>();
+	private long offersCapturedMs;
+	private String offersCapturedAt;
 	private boolean storedTaskDirty;
 	private Snapshot previous;
 	private String currentTaskAssignedAt;
@@ -802,6 +819,91 @@ public class SlayerMonitor {
 		}
 	}
 
+	@Subscribe
+	public void onWidgetLoaded(WidgetLoaded event) {
+		if (event.getGroupId() != TASK_OFFER_GROUP) {
+			return;
+		}
+		// Children populate as the dialog finishes loading; read next cycle.
+		clientThread.invokeLater(this::scrapeTaskOffers);
+	}
+
+	/** Reads the task-offer dialog, if it is one. Client thread only. */
+	private void scrapeTaskOffers() {
+		if (!config.syncSlayer() || !SyncGuard.hasAppKey(config)) {
+			return;
+		}
+		if (GameModeUtil.isSpecialGameMode(client)) {
+			return;
+		}
+		Widget container = client.getWidget(TASK_OFFER_GROUP, TASK_OFFER_CHILD);
+		if (container == null) {
+			return;
+		}
+		Widget[] children = container.getDynamicChildren();
+		if (children == null || children.length == 0) {
+			return;
+		}
+		List<String> texts = new ArrayList<>(children.length);
+		for (Widget child : children) {
+			texts.add(child.getText());
+		}
+		List<Map<String, Object>> offers = parseTaskOffers(texts);
+		if (offers.isEmpty()) {
+			// Group 236 hosts other dialogs too; only offer-shaped content counts.
+			return;
+		}
+		pendingOffers = offers;
+		offersCapturedMs = System.currentTimeMillis();
+		offersCapturedAt = Instant.now().toString();
+		log.debug("Captured {} slayer task offers", offers.size());
+		// Ship immediately so the offers reach the server before (or with) the
+		// accepted assignment; the backend matches them to the opened task row.
+		readAndSync(true);
+	}
+
+	/**
+	 * Parses the offer dialog's child texts into offer maps. Observed row
+	 * shape: task name, then "Amount: N", then four children later the
+	 * modifier line like "25% Bonus Slayer XP". A missing or unparseable
+	 * modifier row leaves those keys absent rather than discarding the
+	 * offer. Package-private for tests.
+	 */
+	static List<Map<String, Object>> parseTaskOffers(List<String> texts) {
+		List<Map<String, Object>> offers = new ArrayList<>();
+		for (int i = 1; i < texts.size(); i++) {
+			String text = texts.get(i);
+			if (text == null || !text.startsWith("Amount: ")) {
+				continue;
+			}
+			int amount;
+			try {
+				amount = Integer.parseInt(text.substring("Amount: ".length()).trim());
+			} catch (NumberFormatException e) {
+				continue;
+			}
+			String name = net.runelite.client.util.Text.removeTags(
+					texts.get(i - 1) == null ? "" : texts.get(i - 1)).trim();
+			if (name.isEmpty() || amount <= 0) {
+				continue;
+			}
+			Map<String, Object> offer = new LinkedHashMap<>();
+			offer.put("name", name);
+			offer.put("amount", amount);
+			if (i + 4 < texts.size() && texts.get(i + 4) != null) {
+				String modifier = net.runelite.client.util.Text.removeTags(texts.get(i + 4)).trim();
+				java.util.regex.Matcher m =
+						java.util.regex.Pattern.compile("^(\\d+)%\\s+(.+)$").matcher(modifier);
+				if (m.matches()) {
+					offer.put("modifier_percent", Integer.parseInt(m.group(1)));
+					offer.put("modifier_text", m.group(2));
+				}
+			}
+			offers.add(offer);
+		}
+		return offers;
+	}
+
 	private SlayerSyncPayload buildPayload(String playerUsername, Snapshot s) {
 		SlayerSyncPayload.State state = new SlayerSyncPayload.State(
 				s.taskId,
@@ -816,7 +918,7 @@ public class SlayerMonitor {
 				s.wildernessStreak,
 				s.blockList,
 				s.unlockBitfields,
-				storedTaskExtra(storedTask),
+				buildExtra(),
 				s.slayerLevel,
 				s.slayerXp,
 				isoOrNull(firstKillMs),
@@ -824,6 +926,17 @@ public class SlayerMonitor {
 				firstKillMs == 0 ? null : activeMs / 1000,
 				Instant.now().toString());
 		return new SlayerSyncPayload(playerUsername, state, new ArrayList<>(pendingEvents));
+	}
+
+	/** Assembles the state extra map: stored task + any recent task offers. */
+	private Map<String, Object> buildExtra() {
+		Map<String, Object> extra = storedTaskExtra(storedTask);
+		if (!pendingOffers.isEmpty()
+				&& System.currentTimeMillis() - offersCapturedMs <= OFFER_RETENTION_MS) {
+			extra.put("task_offers", pendingOffers);
+			extra.put("task_offers_captured_at", offersCapturedAt);
+		}
+		return extra;
 	}
 
 	/**

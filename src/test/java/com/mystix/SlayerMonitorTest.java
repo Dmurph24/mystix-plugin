@@ -159,4 +159,45 @@ public class SlayerMonitorTest {
 		assertEquals(0, extra.get("stored_boss_task_id"));
 		assertFalse(extra.containsKey("stored_task_name"));
 	}
+
+	@Test
+	public void testParseTaskOffersReadsNameAmountAndModifier() {
+		java.util.List<String> texts = java.util.Arrays.asList(
+				"Choose a task:",
+				"<col=ff9040>Abyssal demons</col>",
+				"Amount: 234",
+				"", "", "",
+				"25% Bonus Slayer XP",
+				"<col=ff9040>Gryphons</col>",
+				"Amount: 120",
+				"", "", "",
+				"10% Extra Slayer Points");
+		java.util.List<java.util.Map<String, Object>> offers =
+				SlayerMonitor.parseTaskOffers(texts);
+		org.junit.Assert.assertEquals(2, offers.size());
+		org.junit.Assert.assertEquals("Abyssal demons", offers.get(0).get("name"));
+		org.junit.Assert.assertEquals(234, offers.get(0).get("amount"));
+		org.junit.Assert.assertEquals(25, offers.get(0).get("modifier_percent"));
+		org.junit.Assert.assertEquals("Bonus Slayer XP", offers.get(0).get("modifier_text"));
+		org.junit.Assert.assertEquals("Gryphons", offers.get(1).get("name"));
+	}
+
+	@Test
+	public void testParseTaskOffersToleratesMissingModifier() {
+		java.util.List<String> texts = java.util.Arrays.asList(
+				"<col=ff9040>Basilisks</col>",
+				"Amount: 48",
+				"");
+		java.util.List<java.util.Map<String, Object>> offers =
+				SlayerMonitor.parseTaskOffers(texts);
+		org.junit.Assert.assertEquals(1, offers.size());
+		org.junit.Assert.assertFalse(offers.get(0).containsKey("modifier_percent"));
+	}
+
+	@Test
+	public void testParseTaskOffersRejectsNonOfferDialogs() {
+		java.util.List<String> texts = java.util.Arrays.asList(
+				"Select an option", "Yes", "No", "Cancel");
+		org.junit.Assert.assertTrue(SlayerMonitor.parseTaskOffers(texts).isEmpty());
+	}
 }
