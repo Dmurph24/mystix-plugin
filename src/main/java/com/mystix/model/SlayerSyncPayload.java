@@ -23,7 +23,7 @@ public class SlayerSyncPayload {
 		private final int wilderness_streak;
 		private final List<Integer> block_list;
 		private final Map<String, Integer> unlock_bitfields;
-		private final Map<String, Integer> extra;
+		private final Map<String, Object> extra;
 		private final Integer slayer_level;
 		private final Long slayer_xp;
 		private final String first_kill_at;
@@ -44,7 +44,7 @@ public class SlayerSyncPayload {
 				int wildernessStreak,
 				List<Integer> blockList,
 				Map<String, Integer> unlockBitfields,
-				Map<String, Integer> extra,
+				Map<String, Object> extra,
 				Integer slayerLevel,
 				Long slayerXp,
 				String firstKillAt,

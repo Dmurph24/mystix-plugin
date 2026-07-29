@@ -107,4 +107,56 @@ public class SlayerMonitorTest {
 		assertEquals("completed",
 				SlayerMonitor.claimOutcome(39, 40, 3, 3, 500, 400, false, true));
 	}
+
+	@Test
+	public void testHasStoredTaskRegularTask() {
+		assertTrue(SlayerMonitor.hasStoredTask(51, 77));
+		assertFalse(SlayerMonitor.hasStoredTask(0, 77));
+		assertFalse(SlayerMonitor.hasStoredTask(51, 0));
+		assertFalse(SlayerMonitor.hasStoredTask(0, 0));
+		// Negative amounts only render for the boss sentinel in game.
+		assertFalse(SlayerMonitor.hasStoredTask(51, -1));
+	}
+
+	@Test
+	public void testHasStoredTaskBossSentinel() {
+		assertTrue(SlayerMonitor.hasStoredTask(98, 5));
+		// The rewards script draws a name-only slot for a boss with amount -1.
+		assertTrue(SlayerMonitor.hasStoredTask(98, -1));
+		assertFalse(SlayerMonitor.hasStoredTask(98, 0));
+	}
+
+	@Test
+	public void testStoredTaskExtraEmptyUntilCaptured() {
+		assertTrue(SlayerMonitor.storedTaskExtra(null).isEmpty());
+	}
+
+	@Test
+	public void testStoredTaskExtraCarriesCapture() {
+		SlayerMonitor.StoredTaskCapture capture = new SlayerMonitor.StoredTaskCapture();
+		capture.taskId = 98;
+		capture.amount = 35;
+		capture.bossTaskId = 3;
+		capture.taskName = "Kalphite Queen";
+		capture.capturedAt = "2026-07-28T00:00:00Z";
+		java.util.Map<String, Object> extra = SlayerMonitor.storedTaskExtra(capture);
+		assertEquals(98, extra.get("stored_task_id"));
+		assertEquals(35, extra.get("stored_task_amount"));
+		assertEquals(3, extra.get("stored_boss_task_id"));
+		assertEquals("Kalphite Queen", extra.get("stored_task_name"));
+		assertEquals("2026-07-28T00:00:00Z", extra.get("stored_task_captured_at"));
+	}
+
+	@Test
+	public void testStoredTaskExtraOmitsUnresolvedName() {
+		// A capture that confirmed the storage is EMPTY still syncs zeros, so
+		// the backend can distinguish "empty" from "never captured".
+		SlayerMonitor.StoredTaskCapture capture = new SlayerMonitor.StoredTaskCapture();
+		capture.capturedAt = "2026-07-28T00:00:00Z";
+		java.util.Map<String, Object> extra = SlayerMonitor.storedTaskExtra(capture);
+		assertEquals(0, extra.get("stored_task_id"));
+		assertEquals(0, extra.get("stored_task_amount"));
+		assertEquals(0, extra.get("stored_boss_task_id"));
+		assertFalse(extra.containsKey("stored_task_name"));
+	}
 }

@@ -31,6 +31,7 @@ import net.runelite.api.Skill;
 import net.runelite.api.events.ChatMessage;
 import net.runelite.api.events.GameStateChanged;
 import net.runelite.api.events.GameTick;
+import net.runelite.api.events.ScriptPostFired;
 import net.runelite.api.events.VarbitChanged;
 import net.runelite.api.gameval.DBTableID;
 import net.runelite.api.gameval.VarPlayerID;
@@ -40,8 +41,9 @@ import net.runelite.client.config.ConfigManager;
 import net.runelite.client.eventbus.Subscribe;
 
 /**
- * Monitors slayer state (assignment, points, streaks, block list, unlocks) and
- * task transitions, and syncs them to the Mystix API.
+ * Monitors slayer state (assignment, points, streaks, block list, unlocks,
+ * the Task Storage slot) and task transitions, and syncs them to the Mystix
+ * API.
  *
  * <p>State is read directly from the slayer varps/varbits (no dependency on
  * RuneLite's Slayer plugin being enabled), with task and area names resolved
@@ -81,6 +83,16 @@ public class SlayerMonitor {
 	/** SLAYER_TARGET value meaning "a boss task"; resolve via the sublist table. */
 	private static final int BOSS_TASK_SENTINEL = 98;
 	private static final String PENDING_EVENTS_CONFIG_KEY = "pendingSlayerEvents";
+	private static final String STORED_TASK_CONFIG_KEY = "storedSlayerTask";
+
+	/**
+	 * Clientscripts that draw the rewards-interface Tasks tab: 328 runs once at
+	 * interface setup, 421 re-runs on every var retransmit while it stays open.
+	 * Both render the current and stored task from the IF1-IF6 transfer varps,
+	 * so firing right after them reads values the server just served.
+	 */
+	private static final int SLAYER_REWARDS_TASKS_INIT_SCRIPT = 328;
+	private static final int SLAYER_REWARDS_TASKS_REDRAW_SCRIPT = 421;
 
 	// Loose on purpose: matches the known completion message variants ("You've
 	// completed X tasks in a row...", points and Wilderness forms). The backend
@@ -182,6 +194,21 @@ public class SlayerMonitor {
 		}
 	}
 
+	/**
+	 * The Task Storage slot, captured opportunistically. No persistent varp
+	 * carries the banked task: the server holds it and only copies it into the
+	 * shared IF4/IF5/IF6 interface-transfer varps (amount, task id, boss
+	 * sublist id) while the slayer rewards screen is open. Captures persist to
+	 * RSProfile config so the last known slot survives restarts.
+	 */
+	static class StoredTaskCapture {
+		int taskId;
+		int amount;
+		int bossTaskId;
+		String taskName;
+		String capturedAt;
+	}
+
 	private final Client client;
 	private final ClientThread clientThread;
 	private final MystixConfig config;
@@ -224,6 +251,8 @@ public class SlayerMonitor {
 	private int lastReadTick = -1;
 	private String lastSyncJson;
 	private long lastAmountSyncMs;
+	private StoredTaskCapture storedTask;
+	private boolean storedTaskDirty;
 	private Snapshot previous;
 	private String currentTaskAssignedAt;
 	private String lastCompletionChatText;
@@ -349,6 +378,11 @@ public class SlayerMonitor {
 		lastCompletionChatText = null;
 		lastCompletionChatTick = -1;
 		draft = null;
+		// Drop the in-memory capture but keep the persisted copy: the stored
+		// task is only readable while the rewards screen is open, so the last
+		// capture is restored on the next login.
+		storedTask = null;
+		storedTaskDirty = false;
 		// Zero in-memory timing but keep the persisted copy: a task spanning a
 		// client restart restores it on the next login.
 		lastCountSeen = -1;
@@ -393,6 +427,75 @@ public class SlayerMonitor {
 			lastCompletionChatTick = client.getTickCount();
 			checkPending = true;
 		}
+	}
+
+	@Subscribe
+	public void onScriptPostFired(ScriptPostFired event) {
+		if (event.getScriptId() == SLAYER_REWARDS_TASKS_INIT_SCRIPT
+				|| event.getScriptId() == SLAYER_REWARDS_TASKS_REDRAW_SCRIPT) {
+			captureStoredTask();
+		}
+	}
+
+	/**
+	 * Reads the Task Storage slot from the IF transfer varps. Client thread
+	 * only (script events fire there).
+	 *
+	 * <p>The IF varps are scratch shared by many interfaces (bank, colosseum,
+	 * bond conversion, ...). The tasks-tab script also mirrors the ACTIVE task
+	 * into IF1/IF2; requiring those to match the live task varps proves the
+	 * scratch currently serves the slayer rewards screen.
+	 */
+	private void captureStoredTask() {
+		if (!config.syncSlayer() || !SyncGuard.hasAppKey(config)) {
+			return;
+		}
+		if (client.getVarpValue(VarPlayerID.IF1) != client.getVarpValue(VarPlayerID.SLAYER_COUNT)
+				|| client.getVarpValue(VarPlayerID.IF2)
+						!= client.getVarpValue(VarPlayerID.SLAYER_TARGET)) {
+			log.debug("Skipping stored-task capture: IF varps serve another interface");
+			return;
+		}
+		int amount = client.getVarpValue(VarPlayerID.IF4);
+		int taskId = client.getVarpValue(VarPlayerID.IF5);
+		int bossTaskId = client.getVarpValue(VarPlayerID.IF6);
+		if (!hasStoredTask(taskId, amount)) {
+			// Normalize "no stored task" so residual junk in the scratch varps
+			// can't masquerade as a banked assignment.
+			amount = 0;
+			taskId = 0;
+			bossTaskId = 0;
+		}
+		if (storedTask != null && storedTask.taskId == taskId
+				&& storedTask.amount == amount && storedTask.bossTaskId == bossTaskId) {
+			return; // unchanged; keep the original capture timestamp
+		}
+		StoredTaskCapture capture = new StoredTaskCapture();
+		capture.taskId = taskId;
+		capture.amount = amount;
+		capture.bossTaskId = bossTaskId;
+		capture.taskName = taskId == 0
+				? null
+				: resolveTaskName(taskId, bossTaskId == 0 ? null : bossTaskId);
+		capture.capturedAt = Instant.now().toString();
+		storedTask = capture;
+		storedTaskDirty = true;
+		configManager.setRSProfileConfiguration(
+				"mystix", STORED_TASK_CONFIG_KEY, gson.toJson(capture));
+		checkPending = true;
+		log.debug("Captured stored slayer task: {} x {}", capture.amount, capture.taskName);
+	}
+
+	/**
+	 * Whether the raw IF varp pair encodes a banked task, mirroring the render
+	 * conditions in the rewards-interface script (which draws name-only for a
+	 * boss slot with amount -1).
+	 */
+	static boolean hasStoredTask(int taskId, int amount) {
+		if (taskId == BOSS_TASK_SENTINEL) {
+			return amount > 0 || amount == -1;
+		}
+		return taskId != 0 && amount > 0;
 	}
 
 	@Subscribe
@@ -467,8 +570,12 @@ public class SlayerMonitor {
 		Snapshot now = readSnapshot();
 		if (previous == null) {
 			// First read of the session: adopt persisted timing only if it
-			// belongs to this task.
+			// belongs to this task, and the last stored-task capture unless a
+			// live capture already replaced it.
 			restoreTiming(now);
+			if (storedTask == null) {
+				restoreStoredTask();
+			}
 		}
 		detectTransition(previous, now);
 		boolean taskChanged = previous == null
@@ -490,11 +597,13 @@ public class SlayerMonitor {
 
 		boolean amountWindowOpen =
 				System.currentTimeMillis() - lastAmountSyncMs >= AMOUNT_SYNC_MIN_INTERVAL_MS;
-		if (!force && !taskChanged && pendingEvents.isEmpty() && !amountWindowOpen) {
+		if (!force && !taskChanged && pendingEvents.isEmpty() && !amountWindowOpen
+				&& !storedTaskDirty) {
 			return;
 		}
 
 		SlayerSyncPayload payload = buildPayload(playerUsername, now);
+		storedTaskDirty = false;
 		String json = payload.toJson(gson);
 		if (json.equals(lastSyncJson)) {
 			log.debug("Slayer state unchanged, skipping sync");
@@ -707,7 +816,7 @@ public class SlayerMonitor {
 				s.wildernessStreak,
 				s.blockList,
 				s.unlockBitfields,
-				new LinkedHashMap<>(),
+				storedTaskExtra(storedTask),
 				s.slayerLevel,
 				s.slayerXp,
 				isoOrNull(firstKillMs),
@@ -715,6 +824,43 @@ public class SlayerMonitor {
 				firstKillMs == 0 ? null : activeMs / 1000,
 				Instant.now().toString());
 		return new SlayerSyncPayload(playerUsername, state, new ArrayList<>(pendingEvents));
+	}
+
+	/**
+	 * The extra-map entries for the captured Task Storage slot. Empty until a
+	 * capture exists; zeros mean "capture confirmed the storage is empty",
+	 * which the backend distinguishes from never-captured.
+	 */
+	static Map<String, Object> storedTaskExtra(StoredTaskCapture capture) {
+		Map<String, Object> extra = new LinkedHashMap<>();
+		if (capture == null) {
+			return extra;
+		}
+		extra.put("stored_task_id", capture.taskId);
+		extra.put("stored_task_amount", capture.amount);
+		extra.put("stored_boss_task_id", capture.bossTaskId);
+		if (capture.taskName != null) {
+			extra.put("stored_task_name", capture.taskName);
+		}
+		extra.put("stored_task_captured_at", capture.capturedAt);
+		return extra;
+	}
+
+	/** Reloads the last stored-task capture so restarts keep the known slot. */
+	private void restoreStoredTask() {
+		String stored = configManager.getRSProfileConfiguration("mystix", STORED_TASK_CONFIG_KEY);
+		if (stored == null || stored.isEmpty()) {
+			return;
+		}
+		try {
+			StoredTaskCapture parsed = gson.fromJson(stored, StoredTaskCapture.class);
+			if (parsed != null && parsed.capturedAt != null) {
+				storedTask = parsed;
+			}
+		} catch (RuntimeException e) {
+			log.debug("Discarding unparseable stored-task capture", e);
+			configManager.unsetRSProfileConfiguration("mystix", STORED_TASK_CONFIG_KEY);
+		}
 	}
 
 	/** Drops acknowledged events from the queue and re-persists the remainder. */
