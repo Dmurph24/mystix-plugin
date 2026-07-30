@@ -713,11 +713,15 @@ public class SlayerMonitor {
 		boolean chatRecent = lastCompletionChatTick != -1
 				&& Math.abs(lastCompletionChatTick - draft.detectedTick) <= CHAT_ATTACH_WINDOW_TICKS;
 
+		// The count reaching 0 is only evidence of a last kill once a charge has
+		// been ruled out: a cancel clears the same varp to 0.
+		boolean countedDownToZero = draft.pendingZeroMs > 0;
+
 		String outcome = claimOutcome(
 				before.streak, after.streak,
 				before.wildernessStreak, after.wildernessStreak,
 				before.points, after.points,
-				chatRecent, draft.blockListGained);
+				chatRecent, draft.blockListGained, countedDownToZero);
 		// A completed task by definition reached 0; the before-snapshot can lag
 		// the final kill (observed live: a completion closed with 1 remaining).
 		int amountAtEnd = "completed".equals(outcome) ? 0 : before.amountRemaining;
@@ -746,8 +750,11 @@ public class SlayerMonitor {
 				amountAtEnd,
 				before.streak,
 				after.streak,
+				before.wildernessStreak,
+				after.wildernessStreak,
 				before.points,
 				after.points,
+				countedDownToZero,
 				chatRecent,
 				chatRecent ? lastCompletionChatText : null,
 				draft.blockListGained,
@@ -770,12 +777,18 @@ public class SlayerMonitor {
 	 * block list gaining the task means blocked; a points drop with neither is
 	 * a skip. Point AMOUNTS never classify (Mortimer's skip costs the classic
 	 * block price), the backend checks them against per-master costs.
+	 *
+	 * <p>Once a charge is ruled out, the SIGN still carries: a gain can only be
+	 * an award, and an observed countdown to 0 with nothing charged can only be
+	 * a last kill. Mortimer needs both. It keeps its own streak, which no varbit
+	 * exposes, and its tasks pay only their offer modifier, so one offered
+	 * without a modifier completes with no points movement at all.
 	 */
 	static String claimOutcome(
 			int streakBefore, int streakAfter,
 			int wildStreakBefore, int wildStreakAfter,
 			int pointsBefore, int pointsAfter,
-			boolean chatMatched, boolean blockListGained) {
+			boolean chatMatched, boolean blockListGained, boolean countedDownToZero) {
 		if (streakAfter > streakBefore || wildStreakAfter > wildStreakBefore || chatMatched) {
 			return "completed";
 		}
@@ -787,6 +800,9 @@ public class SlayerMonitor {
 		}
 		if (pointsAfter < pointsBefore) {
 			return "skipped";
+		}
+		if (pointsAfter > pointsBefore || countedDownToZero) {
+			return "completed";
 		}
 		return "unknown";
 	}
