@@ -243,6 +243,33 @@ public class SlayerMonitorTest {
 	}
 
 	@Test
+	public void testParseTaskOffersAgainstCapturedDialogRows() {
+		// Verbatim rows captured from the live Slayer Task Choice dialog
+		// (interface 236.3), including its underline name tags.
+		java.util.List<String> texts = java.util.Arrays.asList(
+				"Slayer Task Choice",
+				"<u=ff981f>Turoth",
+				"Amount: 80 to 120",
+				"+15 Slayer points",
+				"<u=ff981f>Gryphons",
+				"Amount: 80 to 120",
+				"+20 Slayer points",
+				"<col=b2b2b2>Complete 50 tasks with Mortimer to unlock a third choice.");
+		java.util.List<java.util.Map<String, Object>> offers =
+				SlayerMonitor.parseTaskOffers(texts);
+		org.junit.Assert.assertEquals(2, offers.size());
+		org.junit.Assert.assertEquals("Turoth", offers.get(0).get("name"));
+		org.junit.Assert.assertEquals(80, offers.get(0).get("amount_min"));
+		org.junit.Assert.assertEquals(120, offers.get(0).get("amount_max"));
+		org.junit.Assert.assertEquals(15, offers.get(0).get("modifier_value"));
+		org.junit.Assert.assertEquals("Slayer points", offers.get(0).get("modifier_label"));
+		org.junit.Assert.assertEquals("Gryphons", offers.get(1).get("name"));
+		org.junit.Assert.assertEquals(20, offers.get(1).get("modifier_value"));
+		// The locked-third-choice notice must not become an offer.
+		org.junit.Assert.assertEquals(2, offers.size());
+	}
+
+	@Test
 	public void testParseTaskOffersRejectsNonOfferDialogs() {
 		java.util.List<String> texts = java.util.Arrays.asList(
 				"Select an option", "Yes", "No", "Cancel");

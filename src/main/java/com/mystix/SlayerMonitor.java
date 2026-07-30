@@ -93,7 +93,10 @@ public class SlayerMonitor {
 	 * would not.
 	 */
 	private static final int OFFER_SCAN_INTERVAL_TICKS = 5;
-	private static final int OFFER_SCAN_MAX_DEPTH = 4;
+	// The dialog is a nested child of the game frame (observed at depth 7
+	// under root 161.34), so the walk must go deeper than a few levels; that
+	// nesting is also why no WidgetLoaded fires for it.
+	private static final int OFFER_SCAN_MAX_DEPTH = 10;
 	/** How long captured offers ride along in the state sync before expiring. */
 	private static final long OFFER_RETENTION_MS = 30 * 60_000L;
 	private static final String STORED_TASK_CONFIG_KEY = "storedSlayerTask";
