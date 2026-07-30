@@ -21,8 +21,11 @@ public class SlayerTaskEvent {
 	private final int amount_remaining_at_transition;
 	private final Integer streak_before;
 	private final Integer streak_after;
+	private final Integer wilderness_streak_before;
+	private final Integer wilderness_streak_after;
 	private final Integer points_before;
 	private final Integer points_after;
+	private final Boolean counted_down_to_zero;
 	private final Boolean chat_matched;
 	private final String chat_text;
 	private final Boolean block_list_gained_task;
@@ -44,8 +47,11 @@ public class SlayerTaskEvent {
 			int amountRemainingAtTransition,
 			Integer streakBefore,
 			Integer streakAfter,
+			Integer wildernessStreakBefore,
+			Integer wildernessStreakAfter,
 			Integer pointsBefore,
 			Integer pointsAfter,
+			Boolean countedDownToZero,
 			Boolean chatMatched,
 			String chatText,
 			Boolean blockListGainedTask,
@@ -65,8 +71,11 @@ public class SlayerTaskEvent {
 		this.amount_remaining_at_transition = amountRemainingAtTransition;
 		this.streak_before = streakBefore;
 		this.streak_after = streakAfter;
+		this.wilderness_streak_before = wildernessStreakBefore;
+		this.wilderness_streak_after = wildernessStreakAfter;
 		this.points_before = pointsBefore;
 		this.points_after = pointsAfter;
+		this.counted_down_to_zero = countedDownToZero;
 		this.chat_matched = chatMatched;
 		this.chat_text = chatText;
 		this.block_list_gained_task = blockListGainedTask;
