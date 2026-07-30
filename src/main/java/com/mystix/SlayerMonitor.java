@@ -36,6 +36,7 @@ import net.runelite.api.events.VarbitChanged;
 import net.runelite.api.gameval.DBTableID;
 import net.runelite.api.gameval.VarPlayerID;
 import net.runelite.api.gameval.VarbitID;
+import net.runelite.api.widgets.Widget;
 import net.runelite.client.callback.ClientThread;
 import net.runelite.client.config.ConfigManager;
 import net.runelite.client.eventbus.Subscribe;
@@ -83,6 +84,18 @@ public class SlayerMonitor {
 	/** SLAYER_TARGET value meaning "a boss task"; resolve via the sublist table. */
 	private static final int BOSS_TASK_SENTINEL = 98;
 	private static final String PENDING_EVENTS_CONFIG_KEY = "pendingSlayerEvents";
+	/**
+	 * The slayer task-offer dialog (Mortimer's 2-3 choices, each with a name,
+	 * an amount range and a modifier). It raises no WidgetLoaded event, being
+	 * a nested child of the game frame rather than its own interface, so it is
+	 * polled instead. A wrong id costs nothing beyond a null lookup: the parse
+	 * only accepts offer-shaped rows, so it can never yield bad data.
+	 */
+	private static final int TASK_OFFER_GROUP = 236;
+	private static final int TASK_OFFER_CHILD = 3;
+	private static final int OFFER_SCAN_INTERVAL_TICKS = 5;
+	/** How long captured offers ride along in the state sync before expiring. */
+	private static final long OFFER_RETENTION_MS = 30 * 60_000L;
 	private static final String STORED_TASK_CONFIG_KEY = "storedSlayerTask";
 
 	/**
@@ -252,6 +265,11 @@ public class SlayerMonitor {
 	private String lastSyncJson;
 	private long lastAmountSyncMs;
 	private StoredTaskCapture storedTask;
+	private List<Map<String, Object>> pendingOffers = new ArrayList<>();
+	private long offersCapturedMs;
+	private String lastOffersKey;
+	private int lastOfferScanTick = -1;
+	private String offersCapturedAt;
 	private boolean storedTaskDirty;
 	private Snapshot previous;
 	private String currentTaskAssignedAt;
@@ -532,6 +550,11 @@ public class SlayerMonitor {
 
 	@Subscribe
 	public void onGameTick(GameTick event) {
+		if (lastOfferScanTick == -1
+				|| client.getTickCount() - lastOfferScanTick >= OFFER_SCAN_INTERVAL_TICKS) {
+			lastOfferScanTick = client.getTickCount();
+			scanForTaskOffers();
+		}
 		if (draft != null
 				&& client.getTickCount() - draft.detectedTick >= EVENT_FINALIZE_DELAY_TICKS) {
 			finalizeDraft();
@@ -802,6 +825,102 @@ public class SlayerMonitor {
 		}
 	}
 
+
+	/** Reads the task-offer dialog if it is open. Client thread only. */
+	private void scanForTaskOffers() {
+		if (!config.syncSlayer() || !SyncGuard.hasAppKey(config)) {
+			return;
+		}
+		if (GameModeUtil.isSpecialGameMode(client)) {
+			return;
+		}
+		if (SyncGuard.getPlayerUsername(client) == null) {
+			return;
+		}
+		Widget container = client.getWidget(TASK_OFFER_GROUP, TASK_OFFER_CHILD);
+		if (container == null) {
+			return;
+		}
+		Widget[] children = container.getDynamicChildren();
+		if (children == null || children.length == 0) {
+			return;
+		}
+		List<String> texts = new ArrayList<>(children.length);
+		for (Widget child : children) {
+			texts.add(child == null ? null : child.getText());
+		}
+		List<Map<String, Object>> offers = parseTaskOffers(texts);
+		if (!offers.isEmpty()) {
+			acceptOffers(offers);
+		}
+	}
+
+	/** Stores newly seen offers and ships them with the next state sync. */
+	private void acceptOffers(List<Map<String, Object>> offers) {
+		String key = gson.toJson(offers);
+		if (key.equals(lastOffersKey)) {
+			return; // same dialog still open
+		}
+		lastOffersKey = key;
+		pendingOffers = offers;
+		offersCapturedMs = System.currentTimeMillis();
+		offersCapturedAt = Instant.now().toString();
+		log.debug("Captured {} slayer task offers", offers.size());
+		readAndSync(true);
+	}
+
+	/** "Amount: 80 to 120", or a single "Amount: 48". */
+	static final java.util.regex.Pattern AMOUNT_ROW = java.util.regex.Pattern.compile(
+			"^Amount:\\s*(\\d+)(?:\\s*to\\s*(\\d+))?\\s*$", java.util.regex.Pattern.CASE_INSENSITIVE);
+	/** "+15 Slayer points", "+30% Slayer XP", "+100 Assigned", "x2 clue scrolls". */
+	static final java.util.regex.Pattern MODIFIER_ROW = java.util.regex.Pattern.compile(
+			"^([+x])?\\s*(\\d+)(%?)\\s+(.+?)\\s*$", java.util.regex.Pattern.CASE_INSENSITIVE);
+
+	private static String plain(List<String> texts, int index) {
+		if (index < 0 || index >= texts.size() || texts.get(index) == null) {
+			return "";
+		}
+		return net.runelite.client.util.Text.removeTags(texts.get(index)).trim();
+	}
+
+	/**
+	 * Parses the offer dialog's rows. Each offer is a consecutive triple: task
+	 * name, "Amount: X to Y", then the modifier. The modifier row is always
+	 * kept verbatim as modifier_text even when it does not parse, so a wording
+	 * this pattern misses still reaches the server. Package-private for tests.
+	 */
+	static List<Map<String, Object>> parseTaskOffers(List<String> texts) {
+		List<Map<String, Object>> offers = new ArrayList<>();
+		for (int i = 1; i < texts.size(); i++) {
+			java.util.regex.Matcher amount = AMOUNT_ROW.matcher(plain(texts, i));
+			String name = plain(texts, i - 1);
+			if (!amount.matches() || name.isEmpty()) {
+				continue;
+			}
+			Map<String, Object> offer = new LinkedHashMap<>();
+			offer.put("name", name);
+			int min = Integer.parseInt(amount.group(1));
+			offer.put("amount_min", min);
+			offer.put("amount_max",
+					amount.group(2) == null ? min : Integer.parseInt(amount.group(2)));
+
+			String modifier = plain(texts, i + 1);
+			if (!modifier.isEmpty() && !AMOUNT_ROW.matcher(modifier).matches()) {
+				offer.put("modifier_text", modifier);
+				java.util.regex.Matcher mod = MODIFIER_ROW.matcher(modifier);
+				if (mod.matches()) {
+					offer.put("modifier_value", Integer.parseInt(mod.group(2)));
+					offer.put("modifier_is_percent", !mod.group(3).isEmpty());
+					offer.put("modifier_multiplies", "x".equalsIgnoreCase(
+							mod.group(1) == null ? "" : mod.group(1)));
+					offer.put("modifier_label", mod.group(4));
+				}
+			}
+			offers.add(offer);
+		}
+		return offers;
+	}
+
 	private SlayerSyncPayload buildPayload(String playerUsername, Snapshot s) {
 		SlayerSyncPayload.State state = new SlayerSyncPayload.State(
 				s.taskId,
@@ -816,7 +935,7 @@ public class SlayerMonitor {
 				s.wildernessStreak,
 				s.blockList,
 				s.unlockBitfields,
-				storedTaskExtra(storedTask),
+				buildExtra(),
 				s.slayerLevel,
 				s.slayerXp,
 				isoOrNull(firstKillMs),
@@ -824,6 +943,17 @@ public class SlayerMonitor {
 				firstKillMs == 0 ? null : activeMs / 1000,
 				Instant.now().toString());
 		return new SlayerSyncPayload(playerUsername, state, new ArrayList<>(pendingEvents));
+	}
+
+	/** Assembles the state extra map: stored task + any recent task offers. */
+	private Map<String, Object> buildExtra() {
+		Map<String, Object> extra = storedTaskExtra(storedTask);
+		if (!pendingOffers.isEmpty()
+				&& System.currentTimeMillis() - offersCapturedMs <= OFFER_RETENTION_MS) {
+			extra.put("task_offers", pendingOffers);
+			extra.put("task_offers_captured_at", offersCapturedAt);
+		}
+		return extra;
 	}
 
 	/**
