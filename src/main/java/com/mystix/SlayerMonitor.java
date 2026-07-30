@@ -821,55 +821,11 @@ public class SlayerMonitor {
 
 	@Subscribe
 	public void onWidgetLoaded(WidgetLoaded event) {
-		// TEMPORARY DISCOVERY BUILD: dump any loaded group that looks like the
-		// task-offer dialog, whatever its id. Delete before merging.
-		clientThread.invokeLater(() -> debugDumpOfferDialog(event.getGroupId()));
-
 		if (event.getGroupId() != TASK_OFFER_GROUP) {
 			return;
 		}
 		// Children populate as the dialog finishes loading; read next cycle.
 		clientThread.invokeLater(this::scrapeTaskOffers);
-	}
-
-	/** TEMPORARY: logs the full child structure of any offer-looking dialog. */
-	private void debugDumpOfferDialog(int groupId) {
-		for (int childIdx = 0; childIdx < 60; childIdx++) {
-			Widget container = client.getWidget(groupId, childIdx);
-			if (container == null) {
-				continue;
-			}
-			for (Widget[] set : new Widget[][] {
-					container.getDynamicChildren(),
-					container.getStaticChildren(),
-					container.getNestedChildren()}) {
-				if (set == null || set.length == 0) {
-					continue;
-				}
-				boolean looksLikeOffers = false;
-				for (Widget w : set) {
-					String t = w == null ? null : w.getText();
-					if (t != null && (t.contains("Amount") || t.contains("%"))) {
-						looksLikeOffers = true;
-						break;
-					}
-				}
-				if (!looksLikeOffers) {
-					continue;
-				}
-				log.info("MYSTIX-DISCOVERY group={} child={} widgetId={} childCount={}",
-						groupId, childIdx, container.getId(), set.length);
-				for (int i = 0; i < set.length; i++) {
-					Widget w = set[i];
-					if (w == null) {
-						continue;
-					}
-					log.info("MYSTIX-DISCOVERY   [{}] type={} spriteId={} text={}",
-							i, w.getType(), w.getSpriteId(),
-							w.getText() == null ? "" : w.getText());
-				}
-			}
-		}
 	}
 
 	/** Reads the task-offer dialog, if it is one. Client thread only. */
