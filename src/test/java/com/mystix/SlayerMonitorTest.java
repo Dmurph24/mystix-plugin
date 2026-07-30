@@ -216,6 +216,33 @@ public class SlayerMonitorTest {
 	}
 
 	@Test
+	public void testParseTaskOffersReadsSuperiorChanceModifier() {
+		java.util.List<String> texts = java.util.Arrays.asList(
+				"Kurask", "Amount: 40 to 60", "25% superior chance");
+		java.util.List<java.util.Map<String, Object>> offers =
+				SlayerMonitor.parseTaskOffers(texts);
+		org.junit.Assert.assertEquals(1, offers.size());
+		org.junit.Assert.assertEquals(25, offers.get(0).get("modifier_value"));
+		org.junit.Assert.assertEquals(true, offers.get(0).get("modifier_is_percent"));
+		org.junit.Assert.assertEquals("superior chance", offers.get(0).get("modifier_label"));
+		org.junit.Assert.assertEquals(false, offers.get(0).get("modifier_multiplies"));
+	}
+
+	@Test
+	public void testParseTaskOffersKeepsRawRowsForUnrecognisedModifiers() {
+		// An unquantified wording still reaches the server via raw_rows.
+		java.util.List<String> texts = java.util.Arrays.asList(
+				"Dust devils", "Amount: 145 to 237", "Guaranteed superior spawn");
+		java.util.List<java.util.Map<String, Object>> offers =
+				SlayerMonitor.parseTaskOffers(texts);
+		org.junit.Assert.assertEquals(1, offers.size());
+		org.junit.Assert.assertFalse(offers.get(0).containsKey("modifier_value"));
+		org.junit.Assert.assertEquals(
+				java.util.Collections.singletonList("Guaranteed superior spawn"),
+				offers.get(0).get("raw_rows"));
+	}
+
+	@Test
 	public void testParseTaskOffersRejectsNonOfferDialogs() {
 		java.util.List<String> texts = java.util.Arrays.asList(
 				"Select an option", "Yes", "No", "Cancel");

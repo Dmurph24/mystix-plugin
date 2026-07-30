@@ -917,9 +917,15 @@ public class SlayerMonitor {
 	 */
 	static final java.util.regex.Pattern AMOUNT_ROW = java.util.regex.Pattern.compile(
 			"^Amount:\\s*(\\d+)(?:\\s*to\\s*(\\d+))?\\s*$", java.util.regex.Pattern.CASE_INSENSITIVE);
-	/** "+15 Slayer points", "+20% Slayer XP", "x2 clue scrolls". */
+	/**
+	 * Quantified modifier forms: "+15 Slayer points", "+20% Slayer XP",
+	 * "x2 clue scrolls", "25% superior chance". Modifier wording varies by
+	 * type (points, XP, superior chance), so unquantified prose forms are not
+	 * matched here; the offer's raw rows are sent alongside so the server can
+	 * decode a form this pattern misses without needing a plugin release.
+	 */
 	static final java.util.regex.Pattern MODIFIER_ROW = java.util.regex.Pattern.compile(
-			"^([+x])\\s*(\\d+)(%?)\\s+(.+?)\\s*$", java.util.regex.Pattern.CASE_INSENSITIVE);
+			"^([+x])?\\s*(\\d+)(%?)\\s+(.+?)\\s*$", java.util.regex.Pattern.CASE_INSENSITIVE);
 	/** How many rows after the amount row may hold that offer's modifier. */
 	private static final int MODIFIER_SEARCH_SPAN = 8;
 
@@ -959,6 +965,11 @@ public class SlayerMonitor {
 			offer.put("amount_max",
 					amount.group(2) == null ? min : Integer.parseInt(amount.group(2)));
 
+			// One modifier per task, but the wording varies by type, so keep
+			// every row in this offer's block: the server can decode a form
+			// the pattern below misses without a plugin release.
+			List<String> rawRows = new ArrayList<>();
+			boolean modifierFound = false;
 			for (int fwd = i + 1;
 					fwd < texts.size() && fwd <= i + MODIFIER_SEARCH_SPAN; fwd++) {
 				String candidate = texts.get(fwd);
@@ -969,15 +980,23 @@ public class SlayerMonitor {
 				if (AMOUNT_ROW.matcher(candidate).matches()) {
 					break; // reached the next offer
 				}
+				if (candidate.isEmpty()) {
+					continue;
+				}
+				rawRows.add(candidate);
 				java.util.regex.Matcher mod = MODIFIER_ROW.matcher(candidate);
-				if (mod.matches()) {
+				if (!modifierFound && mod.matches()) {
 					offer.put("modifier_text", candidate);
 					offer.put("modifier_value", Integer.parseInt(mod.group(2)));
 					offer.put("modifier_is_percent", !mod.group(3).isEmpty());
-					offer.put("modifier_multiplies", "x".equalsIgnoreCase(mod.group(1)));
+					offer.put("modifier_multiplies",
+							"x".equalsIgnoreCase(mod.group(1) == null ? "" : mod.group(1)));
 					offer.put("modifier_label", mod.group(4));
-					break;
+					modifierFound = true;
 				}
+			}
+			if (!rawRows.isEmpty()) {
+				offer.put("raw_rows", rawRows);
 			}
 			offers.add(offer);
 		}
