@@ -869,58 +869,34 @@ public class SlayerMonitor {
 		readAndSync(true);
 	}
 
-	/**
-	 * Parses the offer dialog's child texts into offer maps. Observed layout
-	 * (Slayer Task Choice): per offer a task-name row, an "Amount: X to Y"
-	 * row, and a modifier row like "+15 Slayer points". Rather than assume
-	 * fixed offsets, each amount row anchors an offer: the name is the nearest
-	 * preceding non-empty text and the modifier is the first modifier-shaped
-	 * row after it, so a layout shuffle degrades to a missing modifier instead
-	 * of dropping the offer. Package-private for tests.
-	 */
+	/** "Amount: 80 to 120", or a single "Amount: 48". */
 	static final java.util.regex.Pattern AMOUNT_ROW = java.util.regex.Pattern.compile(
 			"^Amount:\\s*(\\d+)(?:\\s*to\\s*(\\d+))?\\s*$", java.util.regex.Pattern.CASE_INSENSITIVE);
-	/**
-	 * Quantified modifier forms: "+15 Slayer points", "+20% Slayer XP",
-	 * "x2 clue scrolls", "25% superior chance". Modifier wording varies by
-	 * type (points, XP, superior chance), so unquantified prose forms are not
-	 * matched here; the offer's raw rows are sent alongside so the server can
-	 * decode a form this pattern misses without needing a plugin release.
-	 */
+	/** "+15 Slayer points", "+30% Slayer XP", "+100 Assigned", "x2 clue scrolls". */
 	static final java.util.regex.Pattern MODIFIER_ROW = java.util.regex.Pattern.compile(
 			"^([+x])?\\s*(\\d+)(%?)\\s+(.+?)\\s*$", java.util.regex.Pattern.CASE_INSENSITIVE);
-	/** How many rows after the amount row may hold that offer's modifier. */
-	private static final int MODIFIER_SEARCH_SPAN = 8;
 
+	private static String plain(List<String> texts, int index) {
+		if (index < 0 || index >= texts.size() || texts.get(index) == null) {
+			return "";
+		}
+		return net.runelite.client.util.Text.removeTags(texts.get(index)).trim();
+	}
+
+	/**
+	 * Parses the offer dialog's rows. Each offer is a consecutive triple: task
+	 * name, "Amount: X to Y", then the modifier. The modifier row is always
+	 * kept verbatim as modifier_text even when it does not parse, so a wording
+	 * this pattern misses still reaches the server. Package-private for tests.
+	 */
 	static List<Map<String, Object>> parseTaskOffers(List<String> texts) {
 		List<Map<String, Object>> offers = new ArrayList<>();
-		for (int i = 0; i < texts.size(); i++) {
-			String raw = texts.get(i);
-			if (raw == null) {
+		for (int i = 1; i < texts.size(); i++) {
+			java.util.regex.Matcher amount = AMOUNT_ROW.matcher(plain(texts, i));
+			String name = plain(texts, i - 1);
+			if (!amount.matches() || name.isEmpty()) {
 				continue;
 			}
-			java.util.regex.Matcher amount =
-					AMOUNT_ROW.matcher(net.runelite.client.util.Text.removeTags(raw).trim());
-			if (!amount.matches()) {
-				continue;
-			}
-			String name = null;
-			for (int back = i - 1; back >= 0 && back >= i - MODIFIER_SEARCH_SPAN; back--) {
-				String candidate = texts.get(back);
-				if (candidate == null) {
-					continue;
-				}
-				candidate = net.runelite.client.util.Text.removeTags(candidate).trim();
-				if (!candidate.isEmpty() && !AMOUNT_ROW.matcher(candidate).matches()
-						&& !MODIFIER_ROW.matcher(candidate).matches()) {
-					name = candidate;
-					break;
-				}
-			}
-			if (name == null) {
-				continue;
-			}
-
 			Map<String, Object> offer = new LinkedHashMap<>();
 			offer.put("name", name);
 			int min = Integer.parseInt(amount.group(1));
@@ -928,38 +904,17 @@ public class SlayerMonitor {
 			offer.put("amount_max",
 					amount.group(2) == null ? min : Integer.parseInt(amount.group(2)));
 
-			// One modifier per task, but the wording varies by type, so keep
-			// every row in this offer's block: the server can decode a form
-			// the pattern below misses without a plugin release.
-			List<String> rawRows = new ArrayList<>();
-			boolean modifierFound = false;
-			for (int fwd = i + 1;
-					fwd < texts.size() && fwd <= i + MODIFIER_SEARCH_SPAN; fwd++) {
-				String candidate = texts.get(fwd);
-				if (candidate == null) {
-					continue;
-				}
-				candidate = net.runelite.client.util.Text.removeTags(candidate).trim();
-				if (AMOUNT_ROW.matcher(candidate).matches()) {
-					break; // reached the next offer
-				}
-				if (candidate.isEmpty()) {
-					continue;
-				}
-				rawRows.add(candidate);
-				java.util.regex.Matcher mod = MODIFIER_ROW.matcher(candidate);
-				if (!modifierFound && mod.matches()) {
-					offer.put("modifier_text", candidate);
+			String modifier = plain(texts, i + 1);
+			if (!modifier.isEmpty() && !AMOUNT_ROW.matcher(modifier).matches()) {
+				offer.put("modifier_text", modifier);
+				java.util.regex.Matcher mod = MODIFIER_ROW.matcher(modifier);
+				if (mod.matches()) {
 					offer.put("modifier_value", Integer.parseInt(mod.group(2)));
 					offer.put("modifier_is_percent", !mod.group(3).isEmpty());
-					offer.put("modifier_multiplies",
-							"x".equalsIgnoreCase(mod.group(1) == null ? "" : mod.group(1)));
+					offer.put("modifier_multiplies", "x".equalsIgnoreCase(
+							mod.group(1) == null ? "" : mod.group(1)));
 					offer.put("modifier_label", mod.group(4));
-					modifierFound = true;
 				}
-			}
-			if (!rawRows.isEmpty()) {
-				offer.put("raw_rows", rawRows);
 			}
 			offers.add(offer);
 		}

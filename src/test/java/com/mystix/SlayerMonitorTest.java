@@ -161,137 +161,66 @@ public class SlayerMonitorTest {
 	}
 
 	@Test
-	public void testParseTaskOffersReadsRangeAndPointModifier() {
-		// Observed Slayer Task Choice dialog: two offers, ranged amounts,
-		// "+N Slayer points" modifiers, and a locked-third-choice notice.
-		java.util.List<String> texts = java.util.Arrays.asList(
-				"Slayer Task Choice",
-				"<col=ff9040>Turoth</col>",
-				"Amount: 80 to 120",
-				"",
-				"+15 Slayer points",
-				"<col=ff9040>Gryphons</col>",
-				"Amount: 80 to 120",
-				"",
-				"+20 Slayer points",
-				"Complete 50 tasks with Mortimer to unlock a third choice.");
-		java.util.List<java.util.Map<String, Object>> offers =
-				SlayerMonitor.parseTaskOffers(texts);
-		org.junit.Assert.assertEquals(2, offers.size());
-		org.junit.Assert.assertEquals("Turoth", offers.get(0).get("name"));
-		org.junit.Assert.assertEquals(80, offers.get(0).get("amount_min"));
-		org.junit.Assert.assertEquals(120, offers.get(0).get("amount_max"));
-		org.junit.Assert.assertEquals("+15 Slayer points", offers.get(0).get("modifier_text"));
-		org.junit.Assert.assertEquals(15, offers.get(0).get("modifier_value"));
-		org.junit.Assert.assertEquals(false, offers.get(0).get("modifier_is_percent"));
-		org.junit.Assert.assertEquals("Slayer points", offers.get(0).get("modifier_label"));
-		org.junit.Assert.assertEquals("Gryphons", offers.get(1).get("name"));
-		org.junit.Assert.assertEquals(20, offers.get(1).get("modifier_value"));
-	}
-
-	@Test
-	public void testParseTaskOffersHandlesPercentAndMultiplierModifiers() {
-		java.util.List<String> texts = java.util.Arrays.asList(
-				"Abyssal demons", "Amount: 155 to 234", "+25% Slayer XP",
-				"Gargoyles", "Amount: 120 to 180", "x2 clue scrolls");
-		java.util.List<java.util.Map<String, Object>> offers =
-				SlayerMonitor.parseTaskOffers(texts);
-		org.junit.Assert.assertEquals(2, offers.size());
-		org.junit.Assert.assertEquals(true, offers.get(0).get("modifier_is_percent"));
-		org.junit.Assert.assertEquals("Slayer XP", offers.get(0).get("modifier_label"));
-		org.junit.Assert.assertEquals(true, offers.get(1).get("modifier_multiplies"));
-		org.junit.Assert.assertEquals(2, offers.get(1).get("modifier_value"));
-	}
-
-	@Test
-	public void testParseTaskOffersSingleAmountAndNoModifier() {
-		java.util.List<String> texts = java.util.Arrays.asList(
-				"Basilisks", "Amount: 48", "");
-		java.util.List<java.util.Map<String, Object>> offers =
-				SlayerMonitor.parseTaskOffers(texts);
-		org.junit.Assert.assertEquals(1, offers.size());
-		org.junit.Assert.assertEquals(48, offers.get(0).get("amount_min"));
-		org.junit.Assert.assertEquals(48, offers.get(0).get("amount_max"));
-		org.junit.Assert.assertFalse(offers.get(0).containsKey("modifier_value"));
-	}
-
-	@Test
-	public void testParseTaskOffersReadsSuperiorChanceModifier() {
-		java.util.List<String> texts = java.util.Arrays.asList(
-				"Kurask", "Amount: 40 to 60", "25% superior chance");
-		java.util.List<java.util.Map<String, Object>> offers =
-				SlayerMonitor.parseTaskOffers(texts);
-		org.junit.Assert.assertEquals(1, offers.size());
-		org.junit.Assert.assertEquals(25, offers.get(0).get("modifier_value"));
-		org.junit.Assert.assertEquals(true, offers.get(0).get("modifier_is_percent"));
-		org.junit.Assert.assertEquals("superior chance", offers.get(0).get("modifier_label"));
-		org.junit.Assert.assertEquals(false, offers.get(0).get("modifier_multiplies"));
-	}
-
-	@Test
-	public void testParseTaskOffersKeepsRawRowsForUnrecognisedModifiers() {
-		// An unquantified wording still reaches the server via raw_rows.
-		java.util.List<String> texts = java.util.Arrays.asList(
-				"Dust devils", "Amount: 145 to 237", "Guaranteed superior spawn");
-		java.util.List<java.util.Map<String, Object>> offers =
-				SlayerMonitor.parseTaskOffers(texts);
-		org.junit.Assert.assertEquals(1, offers.size());
-		org.junit.Assert.assertFalse(offers.get(0).containsKey("modifier_value"));
-		org.junit.Assert.assertEquals(
-				java.util.Collections.singletonList("Guaranteed superior spawn"),
-				offers.get(0).get("raw_rows"));
-	}
-
-	@Test
 	public void testParseTaskOffersAgainstCapturedDialogRows() {
 		// Verbatim rows captured from the live Slayer Task Choice dialog
 		// (interface 236.3), including its underline name tags.
-		java.util.List<String> texts = java.util.Arrays.asList(
-				"Slayer Task Choice",
-				"<u=ff981f>Turoth",
-				"Amount: 80 to 120",
-				"+15 Slayer points",
-				"<u=ff981f>Gryphons",
-				"Amount: 80 to 120",
-				"+20 Slayer points",
-				"<col=b2b2b2>Complete 50 tasks with Mortimer to unlock a third choice.");
 		java.util.List<java.util.Map<String, Object>> offers =
-				SlayerMonitor.parseTaskOffers(texts);
-		org.junit.Assert.assertEquals(2, offers.size());
-		org.junit.Assert.assertEquals("Turoth", offers.get(0).get("name"));
-		org.junit.Assert.assertEquals(80, offers.get(0).get("amount_min"));
-		org.junit.Assert.assertEquals(120, offers.get(0).get("amount_max"));
-		org.junit.Assert.assertEquals(15, offers.get(0).get("modifier_value"));
-		org.junit.Assert.assertEquals("Slayer points", offers.get(0).get("modifier_label"));
-		org.junit.Assert.assertEquals("Gryphons", offers.get(1).get("name"));
-		org.junit.Assert.assertEquals(20, offers.get(1).get("modifier_value"));
-		// The locked-third-choice notice must not become an offer.
-		org.junit.Assert.assertEquals(2, offers.size());
+				SlayerMonitor.parseTaskOffers(java.util.Arrays.asList(
+						"Slayer Task Choice",
+						"<u=ff981f>Turoth", "Amount: 80 to 120", "+15 Slayer points",
+						"<u=ff981f>Gryphons", "Amount: 80 to 120", "+20 Slayer points",
+						"<col=b2b2b2>Complete 50 tasks with Mortimer to unlock a third choice."));
+		assertEquals(2, offers.size());
+		assertEquals("Turoth", offers.get(0).get("name"));
+		assertEquals(80, offers.get(0).get("amount_min"));
+		assertEquals(120, offers.get(0).get("amount_max"));
+		assertEquals("+15 Slayer points", offers.get(0).get("modifier_text"));
+		assertEquals(15, offers.get(0).get("modifier_value"));
+		assertEquals("Slayer points", offers.get(0).get("modifier_label"));
+		assertEquals("Gryphons", offers.get(1).get("name"));
+		assertEquals(20, offers.get(1).get("modifier_value"));
 	}
 
 	@Test
 	public void testParseTaskOffersHandlesEveryObservedModifierForm() {
-		// Observed in game: XP, superior chance, and quantity modifiers.
-		java.util.List<String> texts = java.util.Arrays.asList(
-				"<u=ff981f>Turoth", "Amount: 80 to 120", "+30% Slayer XP",
-				"<u=ff981f>Gryphons", "Amount: 80 to 120", "+300% Superior Chance",
-				"<u=ff981f>Kurask", "Amount: 40 to 60", "+100 Assigned");
+		// value, isPercent, label, and the row as displayed in game.
+		Object[][] cases = {
+				{30, true, "Slayer XP", "+30% Slayer XP"},
+				{300, true, "Superior Chance", "+300% Superior Chance"},
+				{100, false, "Assigned", "+100 Assigned"},
+				{2, false, "clue scrolls", "x2 clue scrolls"},
+		};
+		for (Object[] c : cases) {
+			java.util.List<java.util.Map<String, Object>> offers =
+					SlayerMonitor.parseTaskOffers(java.util.Arrays.asList(
+							"<u=ff981f>Turoth", "Amount: 80 to 120", (String) c[3]));
+			assertEquals(1, offers.size());
+			assertEquals(c[3], offers.get(0).get("modifier_text"));
+			assertEquals(c[0], offers.get(0).get("modifier_value"));
+			assertEquals(c[1], offers.get(0).get("modifier_is_percent"));
+			assertEquals(c[2], offers.get(0).get("modifier_label"));
+		}
+	}
+
+	@Test
+	public void testUnparseableModifierWordingIsStillSent() {
 		java.util.List<java.util.Map<String, Object>> offers =
-				SlayerMonitor.parseTaskOffers(texts);
-		org.junit.Assert.assertEquals(3, offers.size());
+				SlayerMonitor.parseTaskOffers(java.util.Arrays.asList(
+						"Dust devils", "Amount: 145 to 237", "Guaranteed superior spawn"));
+		assertEquals(1, offers.size());
+		assertEquals("Guaranteed superior spawn", offers.get(0).get("modifier_text"));
+		assertFalse(offers.get(0).containsKey("modifier_value"));
+	}
 
-		org.junit.Assert.assertEquals(30, offers.get(0).get("modifier_value"));
-		org.junit.Assert.assertEquals(true, offers.get(0).get("modifier_is_percent"));
-		org.junit.Assert.assertEquals("Slayer XP", offers.get(0).get("modifier_label"));
-
-		org.junit.Assert.assertEquals(300, offers.get(1).get("modifier_value"));
-		org.junit.Assert.assertEquals(true, offers.get(1).get("modifier_is_percent"));
-		org.junit.Assert.assertEquals("Superior Chance", offers.get(1).get("modifier_label"));
-
-		// A quantity modifier: the assigned amount can exceed the shown range.
-		org.junit.Assert.assertEquals(100, offers.get(2).get("modifier_value"));
-		org.junit.Assert.assertEquals(false, offers.get(2).get("modifier_is_percent"));
-		org.junit.Assert.assertEquals("Assigned", offers.get(2).get("modifier_label"));
+	@Test
+	public void testParseTaskOffersSingleAmountAndNoModifier() {
+		java.util.List<java.util.Map<String, Object>> offers =
+				SlayerMonitor.parseTaskOffers(java.util.Arrays.asList(
+						"Basilisks", "Amount: 48", ""));
+		assertEquals(1, offers.size());
+		assertEquals(48, offers.get(0).get("amount_min"));
+		assertEquals(48, offers.get(0).get("amount_max"));
+		assertFalse(offers.get(0).containsKey("modifier_text"));
 	}
 
 	@Test
