@@ -821,11 +821,55 @@ public class SlayerMonitor {
 
 	@Subscribe
 	public void onWidgetLoaded(WidgetLoaded event) {
+		// TEMPORARY DISCOVERY BUILD: dump any loaded group that looks like the
+		// task-offer dialog, whatever its id. Delete before merging.
+		clientThread.invokeLater(() -> debugDumpOfferDialog(event.getGroupId()));
+
 		if (event.getGroupId() != TASK_OFFER_GROUP) {
 			return;
 		}
 		// Children populate as the dialog finishes loading; read next cycle.
 		clientThread.invokeLater(this::scrapeTaskOffers);
+	}
+
+	/** TEMPORARY: logs the full child structure of any offer-looking dialog. */
+	private void debugDumpOfferDialog(int groupId) {
+		for (int childIdx = 0; childIdx < 60; childIdx++) {
+			Widget container = client.getWidget(groupId, childIdx);
+			if (container == null) {
+				continue;
+			}
+			for (Widget[] set : new Widget[][] {
+					container.getDynamicChildren(),
+					container.getStaticChildren(),
+					container.getNestedChildren()}) {
+				if (set == null || set.length == 0) {
+					continue;
+				}
+				boolean looksLikeOffers = false;
+				for (Widget w : set) {
+					String t = w == null ? null : w.getText();
+					if (t != null && (t.contains("Amount") || t.contains("%"))) {
+						looksLikeOffers = true;
+						break;
+					}
+				}
+				if (!looksLikeOffers) {
+					continue;
+				}
+				log.info("MYSTIX-DISCOVERY group={} child={} widgetId={} childCount={}",
+						groupId, childIdx, container.getId(), set.length);
+				for (int i = 0; i < set.length; i++) {
+					Widget w = set[i];
+					if (w == null) {
+						continue;
+					}
+					log.info("MYSTIX-DISCOVERY   [{}] type={} spriteId={} text={}",
+							i, w.getType(), w.getSpriteId(),
+							w.getText() == null ? "" : w.getText());
+				}
+			}
+		}
 	}
 
 	/** Reads the task-offer dialog, if it is one. Client thread only. */
@@ -863,40 +907,76 @@ public class SlayerMonitor {
 	}
 
 	/**
-	 * Parses the offer dialog's child texts into offer maps. Observed row
-	 * shape: task name, then "Amount: N", then four children later the
-	 * modifier line like "25% Bonus Slayer XP". A missing or unparseable
-	 * modifier row leaves those keys absent rather than discarding the
-	 * offer. Package-private for tests.
+	 * Parses the offer dialog's child texts into offer maps. Observed layout
+	 * (Slayer Task Choice): per offer a task-name row, an "Amount: X to Y"
+	 * row, and a modifier row like "+15 Slayer points". Rather than assume
+	 * fixed offsets, each amount row anchors an offer: the name is the nearest
+	 * preceding non-empty text and the modifier is the first modifier-shaped
+	 * row after it, so a layout shuffle degrades to a missing modifier instead
+	 * of dropping the offer. Package-private for tests.
 	 */
+	static final java.util.regex.Pattern AMOUNT_ROW = java.util.regex.Pattern.compile(
+			"^Amount:\\s*(\\d+)(?:\\s*to\\s*(\\d+))?\\s*$", java.util.regex.Pattern.CASE_INSENSITIVE);
+	/** "+15 Slayer points", "+20% Slayer XP", "x2 clue scrolls". */
+	static final java.util.regex.Pattern MODIFIER_ROW = java.util.regex.Pattern.compile(
+			"^([+x])\\s*(\\d+)(%?)\\s+(.+?)\\s*$", java.util.regex.Pattern.CASE_INSENSITIVE);
+	/** How many rows after the amount row may hold that offer's modifier. */
+	private static final int MODIFIER_SEARCH_SPAN = 8;
+
 	static List<Map<String, Object>> parseTaskOffers(List<String> texts) {
 		List<Map<String, Object>> offers = new ArrayList<>();
-		for (int i = 1; i < texts.size(); i++) {
-			String text = texts.get(i);
-			if (text == null || !text.startsWith("Amount: ")) {
+		for (int i = 0; i < texts.size(); i++) {
+			String raw = texts.get(i);
+			if (raw == null) {
 				continue;
 			}
-			int amount;
-			try {
-				amount = Integer.parseInt(text.substring("Amount: ".length()).trim());
-			} catch (NumberFormatException e) {
+			java.util.regex.Matcher amount =
+					AMOUNT_ROW.matcher(net.runelite.client.util.Text.removeTags(raw).trim());
+			if (!amount.matches()) {
 				continue;
 			}
-			String name = net.runelite.client.util.Text.removeTags(
-					texts.get(i - 1) == null ? "" : texts.get(i - 1)).trim();
-			if (name.isEmpty() || amount <= 0) {
+			String name = null;
+			for (int back = i - 1; back >= 0 && back >= i - MODIFIER_SEARCH_SPAN; back--) {
+				String candidate = texts.get(back);
+				if (candidate == null) {
+					continue;
+				}
+				candidate = net.runelite.client.util.Text.removeTags(candidate).trim();
+				if (!candidate.isEmpty() && !AMOUNT_ROW.matcher(candidate).matches()
+						&& !MODIFIER_ROW.matcher(candidate).matches()) {
+					name = candidate;
+					break;
+				}
+			}
+			if (name == null) {
 				continue;
 			}
+
 			Map<String, Object> offer = new LinkedHashMap<>();
 			offer.put("name", name);
-			offer.put("amount", amount);
-			if (i + 4 < texts.size() && texts.get(i + 4) != null) {
-				String modifier = net.runelite.client.util.Text.removeTags(texts.get(i + 4)).trim();
-				java.util.regex.Matcher m =
-						java.util.regex.Pattern.compile("^(\\d+)%\\s+(.+)$").matcher(modifier);
-				if (m.matches()) {
-					offer.put("modifier_percent", Integer.parseInt(m.group(1)));
-					offer.put("modifier_text", m.group(2));
+			int min = Integer.parseInt(amount.group(1));
+			offer.put("amount_min", min);
+			offer.put("amount_max",
+					amount.group(2) == null ? min : Integer.parseInt(amount.group(2)));
+
+			for (int fwd = i + 1;
+					fwd < texts.size() && fwd <= i + MODIFIER_SEARCH_SPAN; fwd++) {
+				String candidate = texts.get(fwd);
+				if (candidate == null) {
+					continue;
+				}
+				candidate = net.runelite.client.util.Text.removeTags(candidate).trim();
+				if (AMOUNT_ROW.matcher(candidate).matches()) {
+					break; // reached the next offer
+				}
+				java.util.regex.Matcher mod = MODIFIER_ROW.matcher(candidate);
+				if (mod.matches()) {
+					offer.put("modifier_text", candidate);
+					offer.put("modifier_value", Integer.parseInt(mod.group(2)));
+					offer.put("modifier_is_percent", !mod.group(3).isEmpty());
+					offer.put("modifier_multiplies", "x".equalsIgnoreCase(mod.group(1)));
+					offer.put("modifier_label", mod.group(4));
+					break;
 				}
 			}
 			offers.add(offer);

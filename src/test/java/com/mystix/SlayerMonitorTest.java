@@ -161,37 +161,58 @@ public class SlayerMonitorTest {
 	}
 
 	@Test
-	public void testParseTaskOffersReadsNameAmountAndModifier() {
+	public void testParseTaskOffersReadsRangeAndPointModifier() {
+		// Observed Slayer Task Choice dialog: two offers, ranged amounts,
+		// "+N Slayer points" modifiers, and a locked-third-choice notice.
 		java.util.List<String> texts = java.util.Arrays.asList(
-				"Choose a task:",
-				"<col=ff9040>Abyssal demons</col>",
-				"Amount: 234",
-				"", "", "",
-				"25% Bonus Slayer XP",
+				"Slayer Task Choice",
+				"<col=ff9040>Turoth</col>",
+				"Amount: 80 to 120",
+				"",
+				"+15 Slayer points",
 				"<col=ff9040>Gryphons</col>",
-				"Amount: 120",
-				"", "", "",
-				"10% Extra Slayer Points");
+				"Amount: 80 to 120",
+				"",
+				"+20 Slayer points",
+				"Complete 50 tasks with Mortimer to unlock a third choice.");
 		java.util.List<java.util.Map<String, Object>> offers =
 				SlayerMonitor.parseTaskOffers(texts);
 		org.junit.Assert.assertEquals(2, offers.size());
-		org.junit.Assert.assertEquals("Abyssal demons", offers.get(0).get("name"));
-		org.junit.Assert.assertEquals(234, offers.get(0).get("amount"));
-		org.junit.Assert.assertEquals(25, offers.get(0).get("modifier_percent"));
-		org.junit.Assert.assertEquals("Bonus Slayer XP", offers.get(0).get("modifier_text"));
+		org.junit.Assert.assertEquals("Turoth", offers.get(0).get("name"));
+		org.junit.Assert.assertEquals(80, offers.get(0).get("amount_min"));
+		org.junit.Assert.assertEquals(120, offers.get(0).get("amount_max"));
+		org.junit.Assert.assertEquals("+15 Slayer points", offers.get(0).get("modifier_text"));
+		org.junit.Assert.assertEquals(15, offers.get(0).get("modifier_value"));
+		org.junit.Assert.assertEquals(false, offers.get(0).get("modifier_is_percent"));
+		org.junit.Assert.assertEquals("Slayer points", offers.get(0).get("modifier_label"));
 		org.junit.Assert.assertEquals("Gryphons", offers.get(1).get("name"));
+		org.junit.Assert.assertEquals(20, offers.get(1).get("modifier_value"));
 	}
 
 	@Test
-	public void testParseTaskOffersToleratesMissingModifier() {
+	public void testParseTaskOffersHandlesPercentAndMultiplierModifiers() {
 		java.util.List<String> texts = java.util.Arrays.asList(
-				"<col=ff9040>Basilisks</col>",
-				"Amount: 48",
-				"");
+				"Abyssal demons", "Amount: 155 to 234", "+25% Slayer XP",
+				"Gargoyles", "Amount: 120 to 180", "x2 clue scrolls");
+		java.util.List<java.util.Map<String, Object>> offers =
+				SlayerMonitor.parseTaskOffers(texts);
+		org.junit.Assert.assertEquals(2, offers.size());
+		org.junit.Assert.assertEquals(true, offers.get(0).get("modifier_is_percent"));
+		org.junit.Assert.assertEquals("Slayer XP", offers.get(0).get("modifier_label"));
+		org.junit.Assert.assertEquals(true, offers.get(1).get("modifier_multiplies"));
+		org.junit.Assert.assertEquals(2, offers.get(1).get("modifier_value"));
+	}
+
+	@Test
+	public void testParseTaskOffersSingleAmountAndNoModifier() {
+		java.util.List<String> texts = java.util.Arrays.asList(
+				"Basilisks", "Amount: 48", "");
 		java.util.List<java.util.Map<String, Object>> offers =
 				SlayerMonitor.parseTaskOffers(texts);
 		org.junit.Assert.assertEquals(1, offers.size());
-		org.junit.Assert.assertFalse(offers.get(0).containsKey("modifier_percent"));
+		org.junit.Assert.assertEquals(48, offers.get(0).get("amount_min"));
+		org.junit.Assert.assertEquals(48, offers.get(0).get("amount_max"));
+		org.junit.Assert.assertFalse(offers.get(0).containsKey("modifier_value"));
 	}
 
 	@Test
