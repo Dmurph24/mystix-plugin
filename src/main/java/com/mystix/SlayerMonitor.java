@@ -33,7 +33,6 @@ import net.runelite.api.events.GameStateChanged;
 import net.runelite.api.events.GameTick;
 import net.runelite.api.events.ScriptPostFired;
 import net.runelite.api.events.VarbitChanged;
-import net.runelite.api.events.WidgetLoaded;
 import net.runelite.api.gameval.DBTableID;
 import net.runelite.api.gameval.VarPlayerID;
 import net.runelite.api.gameval.VarbitID;
@@ -86,15 +85,15 @@ public class SlayerMonitor {
 	private static final int BOSS_TASK_SENTINEL = 98;
 	private static final String PENDING_EVENTS_CONFIG_KEY = "pendingSlayerEvents";
 	/**
-	 * Interface group of the slayer task-offer dialog (widget 15466499 =
-	 * group 236 child 3). Mortimer offers 2-3 tasks there, each with a name
-	 * row, an "Amount: N" row, and a modifier ("Mortifier") row carrying a
-	 * percent magnitude. The group may be shared with other dialogs, so
-	 * capture is gated on the parse finding offer-shaped rows, never on the
-	 * group alone.
+	 * The slayer task-offer dialog (Mortimer's 2-3 choices, each with a name,
+	 * an amount range and a modifier) does not raise a WidgetLoaded event, so
+	 * it is found by content instead of by a hardcoded interface id: every few
+	 * ticks the loaded interfaces are scanned for offer-shaped rows. That
+	 * keeps working if the dialog moves between interfaces, which a fixed id
+	 * would not.
 	 */
-	private static final int TASK_OFFER_GROUP = 236;
-	private static final int TASK_OFFER_CHILD = 3;
+	private static final int OFFER_SCAN_INTERVAL_TICKS = 5;
+	private static final int OFFER_SCAN_MAX_DEPTH = 4;
 	/** How long captured offers ride along in the state sync before expiring. */
 	private static final long OFFER_RETENTION_MS = 30 * 60_000L;
 	private static final String STORED_TASK_CONFIG_KEY = "storedSlayerTask";
@@ -268,6 +267,8 @@ public class SlayerMonitor {
 	private StoredTaskCapture storedTask;
 	private List<Map<String, Object>> pendingOffers = new ArrayList<>();
 	private long offersCapturedMs;
+	private String lastOffersKey;
+	private int lastOfferScanTick = -1;
 	private String offersCapturedAt;
 	private boolean storedTaskDirty;
 	private Snapshot previous;
@@ -549,6 +550,11 @@ public class SlayerMonitor {
 
 	@Subscribe
 	public void onGameTick(GameTick event) {
+		if (lastOfferScanTick == -1
+				|| client.getTickCount() - lastOfferScanTick >= OFFER_SCAN_INTERVAL_TICKS) {
+			lastOfferScanTick = client.getTickCount();
+			scanForTaskOffers();
+		}
 		if (draft != null
 				&& client.getTickCount() - draft.detectedTick >= EVENT_FINALIZE_DELAY_TICKS) {
 			finalizeDraft();
@@ -819,46 +825,85 @@ public class SlayerMonitor {
 		}
 	}
 
-	@Subscribe
-	public void onWidgetLoaded(WidgetLoaded event) {
-		if (event.getGroupId() != TASK_OFFER_GROUP) {
-			return;
-		}
-		// Children populate as the dialog finishes loading; read next cycle.
-		clientThread.invokeLater(this::scrapeTaskOffers);
-	}
 
-	/** Reads the task-offer dialog, if it is one. Client thread only. */
-	private void scrapeTaskOffers() {
+	/** Scans loaded interfaces for the task-offer dialog. Client thread only. */
+	private void scanForTaskOffers() {
 		if (!config.syncSlayer() || !SyncGuard.hasAppKey(config)) {
 			return;
 		}
 		if (GameModeUtil.isSpecialGameMode(client)) {
 			return;
 		}
-		Widget container = client.getWidget(TASK_OFFER_GROUP, TASK_OFFER_CHILD);
-		if (container == null) {
+		if (SyncGuard.getPlayerUsername(client) == null) {
 			return;
 		}
-		Widget[] children = container.getDynamicChildren();
-		if (children == null || children.length == 0) {
+		Widget[] roots;
+		try {
+			roots = client.getWidgetRoots();
+		} catch (RuntimeException e) {
 			return;
 		}
-		List<String> texts = new ArrayList<>(children.length);
-		for (Widget child : children) {
-			texts.add(child.getText());
-		}
-		List<Map<String, Object>> offers = parseTaskOffers(texts);
-		if (offers.isEmpty()) {
-			// Group 236 hosts other dialogs too; only offer-shaped content counts.
+		if (roots == null) {
 			return;
 		}
+		for (Widget root : roots) {
+			List<Map<String, Object>> offers = findOffers(root, 0);
+			if (offers != null && !offers.isEmpty()) {
+				acceptOffers(offers);
+				return;
+			}
+		}
+	}
+
+	/** Depth-bounded search for a child set whose text parses as offers. */
+	private List<Map<String, Object>> findOffers(Widget widget, int depth) {
+		if (widget == null || depth > OFFER_SCAN_MAX_DEPTH) {
+			return null;
+		}
+		for (Widget[] set : new Widget[][] {
+				widget.getDynamicChildren(), widget.getStaticChildren(),
+				widget.getNestedChildren()}) {
+			if (set == null || set.length == 0) {
+				continue;
+			}
+			List<String> texts = new ArrayList<>(set.length);
+			boolean anyAmountRow = false;
+			for (Widget child : set) {
+				String text = child == null ? null : child.getText();
+				texts.add(text);
+				if (!anyAmountRow && text != null
+						&& AMOUNT_ROW.matcher(
+								net.runelite.client.util.Text.removeTags(text).trim()).matches()) {
+					anyAmountRow = true;
+				}
+			}
+			if (anyAmountRow) {
+				List<Map<String, Object>> offers = parseTaskOffers(texts);
+				if (!offers.isEmpty()) {
+					return offers;
+				}
+			}
+			for (Widget child : set) {
+				List<Map<String, Object>> nested = findOffers(child, depth + 1);
+				if (nested != null && !nested.isEmpty()) {
+					return nested;
+				}
+			}
+		}
+		return null;
+	}
+
+	/** Stores newly seen offers and ships them with the next state sync. */
+	private void acceptOffers(List<Map<String, Object>> offers) {
+		String key = gson.toJson(offers);
+		if (key.equals(lastOffersKey)) {
+			return; // same dialog still open
+		}
+		lastOffersKey = key;
 		pendingOffers = offers;
 		offersCapturedMs = System.currentTimeMillis();
 		offersCapturedAt = Instant.now().toString();
 		log.debug("Captured {} slayer task offers", offers.size());
-		// Ship immediately so the offers reach the server before (or with) the
-		// accepted assignment; the backend matches them to the opened task row.
 		readAndSync(true);
 	}
 
