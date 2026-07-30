@@ -270,6 +270,31 @@ public class SlayerMonitorTest {
 	}
 
 	@Test
+	public void testParseTaskOffersHandlesEveryObservedModifierForm() {
+		// Observed in game: XP, superior chance, and quantity modifiers.
+		java.util.List<String> texts = java.util.Arrays.asList(
+				"<u=ff981f>Turoth", "Amount: 80 to 120", "+30% Slayer XP",
+				"<u=ff981f>Gryphons", "Amount: 80 to 120", "+300% Superior Chance",
+				"<u=ff981f>Kurask", "Amount: 40 to 60", "+100 Assigned");
+		java.util.List<java.util.Map<String, Object>> offers =
+				SlayerMonitor.parseTaskOffers(texts);
+		org.junit.Assert.assertEquals(3, offers.size());
+
+		org.junit.Assert.assertEquals(30, offers.get(0).get("modifier_value"));
+		org.junit.Assert.assertEquals(true, offers.get(0).get("modifier_is_percent"));
+		org.junit.Assert.assertEquals("Slayer XP", offers.get(0).get("modifier_label"));
+
+		org.junit.Assert.assertEquals(300, offers.get(1).get("modifier_value"));
+		org.junit.Assert.assertEquals(true, offers.get(1).get("modifier_is_percent"));
+		org.junit.Assert.assertEquals("Superior Chance", offers.get(1).get("modifier_label"));
+
+		// A quantity modifier: the assigned amount can exceed the shown range.
+		org.junit.Assert.assertEquals(100, offers.get(2).get("modifier_value"));
+		org.junit.Assert.assertEquals(false, offers.get(2).get("modifier_is_percent"));
+		org.junit.Assert.assertEquals("Assigned", offers.get(2).get("modifier_label"));
+	}
+
+	@Test
 	public void testParseTaskOffersRejectsNonOfferDialogs() {
 		java.util.List<String> texts = java.util.Arrays.asList(
 				"Select an option", "Yes", "No", "Cancel");
