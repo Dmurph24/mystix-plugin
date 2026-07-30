@@ -86,17 +86,14 @@ public class SlayerMonitor {
 	private static final String PENDING_EVENTS_CONFIG_KEY = "pendingSlayerEvents";
 	/**
 	 * The slayer task-offer dialog (Mortimer's 2-3 choices, each with a name,
-	 * an amount range and a modifier) does not raise a WidgetLoaded event, so
-	 * it is found by content instead of by a hardcoded interface id: every few
-	 * ticks the loaded interfaces are scanned for offer-shaped rows. That
-	 * keeps working if the dialog moves between interfaces, which a fixed id
-	 * would not.
+	 * an amount range and a modifier). It raises no WidgetLoaded event, being
+	 * a nested child of the game frame rather than its own interface, so it is
+	 * polled instead. A wrong id costs nothing beyond a null lookup: the parse
+	 * only accepts offer-shaped rows, so it can never yield bad data.
 	 */
+	private static final int TASK_OFFER_GROUP = 236;
+	private static final int TASK_OFFER_CHILD = 3;
 	private static final int OFFER_SCAN_INTERVAL_TICKS = 5;
-	// The dialog is a nested child of the game frame (observed at depth 7
-	// under root 161.34), so the walk must go deeper than a few levels; that
-	// nesting is also why no WidgetLoaded fires for it.
-	private static final int OFFER_SCAN_MAX_DEPTH = 10;
 	/** How long captured offers ride along in the state sync before expiring. */
 	private static final long OFFER_RETENTION_MS = 30 * 60_000L;
 	private static final String STORED_TASK_CONFIG_KEY = "storedSlayerTask";
@@ -829,7 +826,7 @@ public class SlayerMonitor {
 	}
 
 
-	/** Scans loaded interfaces for the task-offer dialog. Client thread only. */
+	/** Reads the task-offer dialog if it is open. Client thread only. */
 	private void scanForTaskOffers() {
 		if (!config.syncSlayer() || !SyncGuard.hasAppKey(config)) {
 			return;
@@ -840,60 +837,22 @@ public class SlayerMonitor {
 		if (SyncGuard.getPlayerUsername(client) == null) {
 			return;
 		}
-		Widget[] roots;
-		try {
-			roots = client.getWidgetRoots();
-		} catch (RuntimeException e) {
+		Widget container = client.getWidget(TASK_OFFER_GROUP, TASK_OFFER_CHILD);
+		if (container == null) {
 			return;
 		}
-		if (roots == null) {
+		Widget[] children = container.getDynamicChildren();
+		if (children == null || children.length == 0) {
 			return;
 		}
-		for (Widget root : roots) {
-			List<Map<String, Object>> offers = findOffers(root, 0);
-			if (offers != null && !offers.isEmpty()) {
-				acceptOffers(offers);
-				return;
-			}
+		List<String> texts = new ArrayList<>(children.length);
+		for (Widget child : children) {
+			texts.add(child == null ? null : child.getText());
 		}
-	}
-
-	/** Depth-bounded search for a child set whose text parses as offers. */
-	private List<Map<String, Object>> findOffers(Widget widget, int depth) {
-		if (widget == null || depth > OFFER_SCAN_MAX_DEPTH) {
-			return null;
+		List<Map<String, Object>> offers = parseTaskOffers(texts);
+		if (!offers.isEmpty()) {
+			acceptOffers(offers);
 		}
-		for (Widget[] set : new Widget[][] {
-				widget.getDynamicChildren(), widget.getStaticChildren(),
-				widget.getNestedChildren()}) {
-			if (set == null || set.length == 0) {
-				continue;
-			}
-			List<String> texts = new ArrayList<>(set.length);
-			boolean anyAmountRow = false;
-			for (Widget child : set) {
-				String text = child == null ? null : child.getText();
-				texts.add(text);
-				if (!anyAmountRow && text != null
-						&& AMOUNT_ROW.matcher(
-								net.runelite.client.util.Text.removeTags(text).trim()).matches()) {
-					anyAmountRow = true;
-				}
-			}
-			if (anyAmountRow) {
-				List<Map<String, Object>> offers = parseTaskOffers(texts);
-				if (!offers.isEmpty()) {
-					return offers;
-				}
-			}
-			for (Widget child : set) {
-				List<Map<String, Object>> nested = findOffers(child, depth + 1);
-				if (nested != null && !nested.isEmpty()) {
-					return nested;
-				}
-			}
-		}
-		return null;
 	}
 
 	/** Stores newly seen offers and ships them with the next state sync. */
