@@ -100,6 +100,32 @@ public class AchievementDiariesReaderTest {
 	}
 
 	@Test
+	public void testStaleCompleteImageReadsEverythingComplete() {
+		// Reproduces the production bug: the client varp array momentarily holds a prior
+		// fully-completed session's values (read during the post-login varp replay). Every
+		// player-bit test passes (-1 = all bits set) and each diary varbit reads exactly its
+		// completed value (1, or 5 for the three Karamja tasks). The reader is a faithful
+		// mirror of that array, so it emits an all-true payload — 492 booleans plus 48
+		// complete flags — which is why one bad sample permanently maxes an account. A
+		// uniform -1 fill alone could NOT do this: the Karamja == 5 varbits are multi-bit
+		// fields that extract to 7 under all-ones, so they must read their real value 5.
+		IntUnaryOperator completeVarbit = id -> (id == 3566 || id == 3573 || id == 3607) ? 5 : 1;
+		IntUnaryOperator completeVarp = id -> -1;
+
+		Map<String, Map<String, DiaryTierResult>> diaries = reader.read(completeVarbit, completeVarp);
+
+		int tierCount = 0;
+		for (Map<String, DiaryTierResult> tiers : diaries.values()) {
+			for (DiaryTierResult tier : tiers.values()) {
+				tierCount++;
+				assertTrue(tier.isComplete());
+				assertTrue(tier.getTasks().stream().allMatch(Boolean::booleanValue));
+			}
+		}
+		assertEquals(48, tierCount);
+	}
+
+	@Test
 	public void testDesertMediumSpecialCaseEitherVarp() {
 		// Desert Medium task 10 = bit(varp 1199, 9) OR bit(varp 1198, 22).
 		Map<Integer, Integer> viaIronmanVarp = new HashMap<>();
