@@ -56,7 +56,7 @@ final class DiarySyncTrigger {
 	 */
 	Decision tick(int currentTick, boolean loggedInNow) {
 		if (!loggedInNow) {
-			resetSession();
+			reset();
 			return Decision.NONE;
 		}
 		if (!loggedIn) {
@@ -88,33 +88,29 @@ final class DiarySyncTrigger {
 	 * logout during the settle window never sends transitional data), then resets.
 	 */
 	boolean leaveAndShouldFlush() {
-		boolean flush = loggedIn && baselineSynced;
-		resetSession();
+		// baselineSynced is only ever set while logged in, so it already implies loggedIn.
+		boolean flush = baselineSynced;
+		reset();
 		return flush;
 	}
 
 	/** True once this session's settle period has elapsed and the baseline read has run. */
 	boolean isBaselineSynced() {
-		return loggedIn && baselineSynced;
+		return baselineSynced;
 	}
 
+	/** Clears all session state; the next logged-in tick starts a fresh settle window. */
 	void reset() {
-		resetSession();
-	}
-
-	private void enterSession(int currentTick) {
-		loggedIn = true;
-		baselineSynced = false;
-		loginTick = currentTick;
-		resyncPending = false;
-		lastReadTick = -1;
-	}
-
-	private void resetSession() {
 		loggedIn = false;
 		baselineSynced = false;
 		loginTick = -1;
 		resyncPending = false;
 		lastReadTick = -1;
+	}
+
+	private void enterSession(int currentTick) {
+		reset();
+		loggedIn = true;
+		loginTick = currentTick;
 	}
 }
