@@ -251,6 +251,73 @@ public class SlayerMonitorTest {
 	}
 
 	@Test
+	public void testNegativeModifierKeepsItsSign() {
+		// Mortimer's "-20 Assigned" asks for 20 FEWER kills than the amount
+		// rolled; dropping the sign would have it ask for 20 more.
+		java.util.List<java.util.Map<String, Object>> offers =
+				SlayerMonitor.parseTaskOffers(java.util.Arrays.asList(
+						"<u=ff981f>Banshees", "Amount: 35 to 50", "-20 Assigned"));
+		assertEquals(1, offers.size());
+		assertEquals("-20 Assigned", offers.get(0).get("modifier_text"));
+		assertEquals(-20, offers.get(0).get("modifier_value"));
+		assertEquals("Assigned", offers.get(0).get("modifier_label"));
+		assertFalse((Boolean) offers.get(0).get("modifier_multiplies"));
+	}
+
+	@Test
+	public void testModifierIsFoundAcrossUntextedRows() {
+		// The dialog's rows are only consecutive once its untexted widgets are
+		// stepped over; indexing straight to the next row misses the modifier.
+		java.util.List<java.util.Map<String, Object>> offers =
+				SlayerMonitor.parseTaskOffers(java.util.Arrays.asList(
+						"<u=ff981f>Turoth", "Amount: 80 to 120", "", "+15 Slayer points",
+						"<u=ff981f>Kurask", "Amount: 40 to 60", "", "+20 Slayer points"));
+		assertEquals(2, offers.size());
+		assertEquals("+15 Slayer points", offers.get(0).get("modifier_text"));
+		assertEquals("Kurask", offers.get(1).get("name"));
+		assertEquals("+20 Slayer points", offers.get(1).get("modifier_text"));
+	}
+
+	@Test
+	public void testNextOffersNameIsNotReadAsAModifier() {
+		java.util.List<java.util.Map<String, Object>> offers =
+				SlayerMonitor.parseTaskOffers(java.util.Arrays.asList(
+						"<u=ff981f>Turoth", "Amount: 80 to 120",
+						"<u=ff981f>Kurask", "Amount: 40 to 60"));
+		assertEquals(2, offers.size());
+		assertFalse(offers.get(0).containsKey("modifier_text"));
+		assertEquals("Kurask", offers.get(1).get("name"));
+	}
+
+	@Test
+	public void testReadingOrderSortsRowsDownTheDialog() {
+		// Walking the static, dynamic and nested child lists in turn groups
+		// the rows by list; only where they drew says which offer owns which.
+		java.util.List<String> texts = SlayerMonitor.readingOrder(java.util.Arrays.asList(
+				new SlayerMonitor.OfferRow("<u=ff981f>Turoth", 20, 40),
+				new SlayerMonitor.OfferRow("<u=ff981f>Kurask", 20, 80),
+				new SlayerMonitor.OfferRow("Amount: 80 to 120", 20, 55),
+				new SlayerMonitor.OfferRow("Amount: 40 to 60", 20, 95),
+				new SlayerMonitor.OfferRow("+15 Slayer points", 20, 70),
+				new SlayerMonitor.OfferRow("+20 Slayer points", 20, 110)));
+		java.util.List<java.util.Map<String, Object>> offers =
+				SlayerMonitor.parseTaskOffers(texts);
+		assertEquals(2, offers.size());
+		assertEquals("Turoth", offers.get(0).get("name"));
+		assertEquals(15, offers.get(0).get("modifier_value"));
+		assertEquals("Kurask", offers.get(1).get("name"));
+		assertEquals(20, offers.get(1).get("modifier_value"));
+	}
+
+	@Test
+	public void testReadingOrderKeepsWalkOrderWhenAnyRowIsUnplaced() {
+		java.util.List<String> texts = SlayerMonitor.readingOrder(java.util.Arrays.asList(
+				new SlayerMonitor.OfferRow("second", 20, 80),
+				new SlayerMonitor.OfferRow("first", null, null)));
+		assertEquals(java.util.Arrays.asList("second", "first"), texts);
+	}
+
+	@Test
 	public void testParseTaskOffersRejectsNonOfferDialogs() {
 		java.util.List<String> texts = java.util.Arrays.asList(
 				"Select an option", "Yes", "No", "Cancel");

@@ -14,6 +14,7 @@ import com.mystix.model.SlayerSyncPayload;
 import com.mystix.model.SlayerTaskEvent;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -27,6 +28,7 @@ import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.ChatMessageType;
 import net.runelite.api.Client;
 import net.runelite.api.GameState;
+import net.runelite.api.Point;
 import net.runelite.api.Skill;
 import net.runelite.api.events.ChatMessage;
 import net.runelite.api.events.GameStateChanged;
@@ -90,10 +92,24 @@ public class SlayerMonitor {
 	 * a nested child of the game frame rather than its own interface, so it is
 	 * polled instead. A wrong id costs nothing beyond a null lookup: the parse
 	 * only accepts offer-shaped rows, so it can never yield bad data.
+	 *
+	 * <p>The whole subtree under the container is read, not one child list.
+	 * Reading only the dynamic children captured every name and amount but
+	 * never a modifier from any live dialog, so the modifier rows do not live
+	 * where the names do.
 	 */
 	private static final int TASK_OFFER_GROUP = 236;
 	private static final int TASK_OFFER_CHILD = 3;
 	private static final int OFFER_SCAN_INTERVAL_TICKS = 5;
+	/** How deep under the dialog container its text rows may sit. */
+	private static final int OFFER_SCAN_MAX_DEPTH = 5;
+	/**
+	 * How long a capture stays the "same dialog" for downgrade purposes. A
+	 * re-read of the open dialog must never replace a richer capture with a
+	 * thinner one; the same two tasks offered again later is a new dialog and
+	 * replaces it whatever it carries.
+	 */
+	private static final long OFFER_REFRESH_WINDOW_MS = 60_000L;
 	/** How long captured offers ride along in the state sync before expiring. */
 	private static final long OFFER_RETENTION_MS = 30 * 60_000L;
 	private static final String STORED_TASK_CONFIG_KEY = "storedSlayerTask";
@@ -266,6 +282,7 @@ public class SlayerMonitor {
 	private long lastAmountSyncMs;
 	private StoredTaskCapture storedTask;
 	private List<Map<String, Object>> pendingOffers = new ArrayList<>();
+	private List<String> pendingOfferRows;
 	private long offersCapturedMs;
 	private String lastOffersKey;
 	private int lastOfferScanTick = -1;
@@ -857,40 +874,154 @@ public class SlayerMonitor {
 		if (container == null) {
 			return;
 		}
-		Widget[] children = container.getDynamicChildren();
-		if (children == null || children.length == 0) {
+		List<OfferRow> rows = new ArrayList<>();
+		collectRows(container, 0, rows);
+		if (rows.isEmpty()) {
 			return;
 		}
-		List<String> texts = new ArrayList<>(children.length);
-		for (Widget child : children) {
-			texts.add(child == null ? null : child.getText());
-		}
+		List<String> texts = readingOrder(rows);
 		List<Map<String, Object>> offers = parseTaskOffers(texts);
 		if (!offers.isEmpty()) {
-			acceptOffers(offers);
+			acceptOffers(offers, texts);
 		}
 	}
 
+	/**
+	 * Every text-bearing widget under the dialog, whichever child list holds
+	 * it. The static, dynamic and nested lists are all walked because the
+	 * modifier row is not in the same one as the name and amount rows.
+	 */
+	private static void collectRows(Widget widget, int depth, List<OfferRow> rows) {
+		if (widget == null || depth > OFFER_SCAN_MAX_DEPTH) {
+			return;
+		}
+		String text = widget.getText();
+		if (text != null && !text.isEmpty()) {
+			Point at = widget.getCanvasLocation();
+			rows.add(at == null
+					? new OfferRow(text, null, null)
+					: new OfferRow(text, at.getX(), at.getY()));
+		}
+		for (Widget[] set : new Widget[][] {
+				widget.getStaticChildren(), widget.getDynamicChildren(),
+				widget.getNestedChildren()}) {
+			if (set == null) {
+				continue;
+			}
+			for (Widget child : set) {
+				collectRows(child, depth + 1, rows);
+			}
+		}
+	}
+
+	/** One text row of the offer dialog, with where on screen it drew. */
+	static final class OfferRow {
+		final String text;
+		final Integer x;
+		final Integer y;
+
+		OfferRow(String text, Integer x, Integer y) {
+			this.text = text;
+			this.x = x;
+			this.y = y;
+		}
+
+		boolean positioned() {
+			return x != null && y != null && y >= 0;
+		}
+	}
+
+	/**
+	 * The rows top to bottom as the player reads them. The dialog is a
+	 * vertical list, so screen position restores the reading order even when
+	 * the rows are gathered from different child lists, which walk order
+	 * groups rather than interleaves. Positions are only trusted when every
+	 * row has one; otherwise walk order stands.
+	 */
+	static List<String> readingOrder(List<OfferRow> rows) {
+		List<OfferRow> ordered = new ArrayList<>(rows);
+		boolean positioned = true;
+		for (OfferRow row : rows) {
+			positioned &= row.positioned();
+		}
+		if (positioned) {
+			ordered.sort(Comparator.comparingInt((OfferRow row) -> row.y)
+					.thenComparingInt(row -> row.x));
+		}
+		List<String> texts = new ArrayList<>(ordered.size());
+		for (OfferRow row : ordered) {
+			texts.add(row.text);
+		}
+		return texts;
+	}
+
 	/** Stores newly seen offers and ships them with the next state sync. */
-	private void acceptOffers(List<Map<String, Object>> offers) {
+	private void acceptOffers(List<Map<String, Object>> offers, List<String> rows) {
 		String key = gson.toJson(offers);
 		if (key.equals(lastOffersKey)) {
 			return; // same dialog still open
 		}
+		if (isThinnerReread(offers)) {
+			return;
+		}
 		lastOffersKey = key;
 		pendingOffers = offers;
+		// The rows only ride along when a modifier is missing: they are what
+		// says where the missing row actually lives, without a release to ask.
+		pendingOfferRows = modifierCount(offers) < offers.size() ? rows : null;
 		offersCapturedMs = System.currentTimeMillis();
 		offersCapturedAt = Instant.now().toString();
-		log.debug("Captured {} slayer task offers", offers.size());
+		log.debug("Captured {} slayer task offers, {} with a modifier",
+				offers.size(), modifierCount(offers));
 		readAndSync(true);
+	}
+
+	/**
+	 * Whether this read is the dialog already captured, seen with fewer
+	 * modifiers than last time. A row that populates late (or blanks as the
+	 * dialog closes) makes the same dialog read differently on either side of
+	 * it, and the fuller read is the true one.
+	 */
+	private boolean isThinnerReread(List<Map<String, Object>> offers) {
+		if (pendingOffers.isEmpty()
+				|| System.currentTimeMillis() - offersCapturedMs > OFFER_REFRESH_WINDOW_MS) {
+			return false;
+		}
+		return offerNames(offers).equals(offerNames(pendingOffers))
+				&& modifierCount(offers) < modifierCount(pendingOffers);
+	}
+
+	private static List<Object> offerNames(List<Map<String, Object>> offers) {
+		List<Object> names = new ArrayList<>(offers.size());
+		for (Map<String, Object> offer : offers) {
+			names.add(offer.get("name"));
+		}
+		return names;
+	}
+
+	private static int modifierCount(List<Map<String, Object>> offers) {
+		int count = 0;
+		for (Map<String, Object> offer : offers) {
+			if (offer.containsKey("modifier_text")) {
+				count++;
+			}
+		}
+		return count;
 	}
 
 	/** "Amount: 80 to 120", or a single "Amount: 48". */
 	static final java.util.regex.Pattern AMOUNT_ROW = java.util.regex.Pattern.compile(
 			"^Amount:\\s*(\\d+)(?:\\s*to\\s*(\\d+))?\\s*$", java.util.regex.Pattern.CASE_INSENSITIVE);
-	/** "+15 Slayer points", "+30% Slayer XP", "+100 Assigned", "x2 clue scrolls". */
+	/**
+	 * "+15 Slayer points", "+30% Slayer XP", "+100 Assigned", "x2 clue
+	 * scrolls", "-20 Assigned". Modifiers subtract as well as add, so the sign
+	 * is part of the value: a "-20 Assigned" task asks for 20 fewer kills than
+	 * the amount rolled, and reading it as +20 would have it ask for 40 more.
+	 */
 	static final java.util.regex.Pattern MODIFIER_ROW = java.util.regex.Pattern.compile(
-			"^([+x])?\\s*(\\d+)(%?)\\s+(.+?)\\s*$", java.util.regex.Pattern.CASE_INSENSITIVE);
+			"^([+\\-x])?\\s*(\\d+)(%?)\\s+(.+?)\\s*$", java.util.regex.Pattern.CASE_INSENSITIVE);
+	/** How many rows either side of an amount row still belong to that offer. */
+	private static final int OFFER_BLOCK_SPAN = 6;
 
 	private static String plain(List<String> texts, int index) {
 		if (index < 0 || index >= texts.size() || texts.get(index) == null) {
@@ -900,17 +1031,25 @@ public class SlayerMonitor {
 	}
 
 	/**
-	 * Parses the offer dialog's rows. Each offer is a consecutive triple: task
-	 * name, "Amount: X to Y", then the modifier. The modifier row is always
-	 * kept verbatim as modifier_text even when it does not parse, so a wording
-	 * this pattern misses still reaches the server. Package-private for tests.
+	 * Parses the offer dialog's rows, anchored on each "Amount: X to Y" row:
+	 * the name is the row before it and the modifier the row after, with blank
+	 * rows skipped on both sides. The rows are only consecutive once the
+	 * dialog's untexted widgets are stepped over, which is why this searches
+	 * rather than indexes.
+	 *
+	 * <p>The modifier row is kept verbatim as modifier_text even when it does
+	 * not parse, so a wording this pattern misses still reaches the server.
+	 * Package-private for tests.
 	 */
 	static List<Map<String, Object>> parseTaskOffers(List<String> texts) {
 		List<Map<String, Object>> offers = new ArrayList<>();
-		for (int i = 1; i < texts.size(); i++) {
+		for (int i = 0; i < texts.size(); i++) {
 			java.util.regex.Matcher amount = AMOUNT_ROW.matcher(plain(texts, i));
-			String name = plain(texts, i - 1);
-			if (!amount.matches() || name.isEmpty()) {
+			if (!amount.matches()) {
+				continue;
+			}
+			String name = nameBefore(texts, i);
+			if (name == null) {
 				continue;
 			}
 			Map<String, Object> offer = new LinkedHashMap<>();
@@ -920,21 +1059,61 @@ public class SlayerMonitor {
 			offer.put("amount_max",
 					amount.group(2) == null ? min : Integer.parseInt(amount.group(2)));
 
-			String modifier = plain(texts, i + 1);
-			if (!modifier.isEmpty() && !AMOUNT_ROW.matcher(modifier).matches()) {
+			String modifier = modifierAfter(texts, i);
+			if (modifier != null) {
 				offer.put("modifier_text", modifier);
 				java.util.regex.Matcher mod = MODIFIER_ROW.matcher(modifier);
 				if (mod.matches()) {
-					offer.put("modifier_value", Integer.parseInt(mod.group(2)));
+					String sign = mod.group(1) == null ? "" : mod.group(1);
+					int value = Integer.parseInt(mod.group(2));
+					offer.put("modifier_value", "-".equals(sign) ? -value : value);
 					offer.put("modifier_is_percent", !mod.group(3).isEmpty());
-					offer.put("modifier_multiplies", "x".equalsIgnoreCase(
-							mod.group(1) == null ? "" : mod.group(1)));
+					offer.put("modifier_multiplies", "x".equalsIgnoreCase(sign));
 					offer.put("modifier_label", mod.group(4));
 				}
 			}
 			offers.add(offer);
 		}
 		return offers;
+	}
+
+	/** The task name an amount row belongs to: the row above it, blanks aside. */
+	private static String nameBefore(List<String> texts, int amountIndex) {
+		for (int i = amountIndex - 1;
+				i >= 0 && i >= amountIndex - OFFER_BLOCK_SPAN; i--) {
+			String row = plain(texts, i);
+			if (row.isEmpty() || MODIFIER_ROW.matcher(row).matches()) {
+				continue;
+			}
+			return AMOUNT_ROW.matcher(row).matches() ? null : row;
+		}
+		return null;
+	}
+
+	/**
+	 * The modifier an amount row belongs to: the first row below it, blanks
+	 * aside. The next offer's name sits in that same gap, so a row butting up
+	 * against the next amount row is that name and not this offer's modifier.
+	 */
+	private static String modifierAfter(List<String> texts, int amountIndex) {
+		List<String> block = new ArrayList<>();
+		boolean nextOfferReached = false;
+		for (int i = amountIndex + 1;
+				i < texts.size() && i <= amountIndex + OFFER_BLOCK_SPAN; i++) {
+			String row = plain(texts, i);
+			if (row.isEmpty()) {
+				continue;
+			}
+			if (AMOUNT_ROW.matcher(row).matches()) {
+				nextOfferReached = true;
+				break;
+			}
+			block.add(row);
+		}
+		if (nextOfferReached && !block.isEmpty()) {
+			block.remove(block.size() - 1);
+		}
+		return block.isEmpty() ? null : block.get(0);
 	}
 
 	private SlayerSyncPayload buildPayload(String playerUsername, Snapshot s) {
@@ -968,6 +1147,9 @@ public class SlayerMonitor {
 				&& System.currentTimeMillis() - offersCapturedMs <= OFFER_RETENTION_MS) {
 			extra.put("task_offers", pendingOffers);
 			extra.put("task_offers_captured_at", offersCapturedAt);
+			if (pendingOfferRows != null) {
+				extra.put("task_offer_rows", pendingOfferRows);
+			}
 		}
 		return extra;
 	}
