@@ -19,6 +19,7 @@ import net.runelite.client.ui.overlay.OverlayPanel;
 import net.runelite.client.ui.overlay.OverlayPosition;
 import net.runelite.client.ui.overlay.components.ComponentOrientation;
 import net.runelite.client.ui.overlay.components.ImageComponent;
+import net.runelite.client.ui.overlay.components.LayoutableRenderableEntity;
 import net.runelite.client.ui.overlay.components.LineComponent;
 import net.runelite.client.ui.overlay.components.SplitComponent;
 
@@ -42,6 +43,9 @@ public class NextGoalOverlay extends OverlayPanel {
 	private static final int MAX_TEXT_WIDTH = 200;
 	/** Gap between the item icon and the goal name. */
 	private static final int ICON_GAP = 6;
+	/** Transparent spacer that adds vertical margin between the title and the goal. */
+	private static final BufferedImage TITLE_CONTENT_SPACER =
+			new BufferedImage(1, 4, BufferedImage.TYPE_INT_ARGB);
 
 	private final MystixConfig config;
 	private final RoadmapManager roadmapManager;
@@ -87,25 +91,26 @@ public class NextGoalOverlay extends OverlayPanel {
 		int iconWidth = icon != null ? icon.getWidth() : 0;
 
 		// Word-wrap both lines so long content flows onto multiple lines instead
-		// of spilling past the background box. The first goal-name line also
-		// carries the icon, so it wraps in the narrower space left of it.
+		// of spilling past the background box. The goal name sits to the right of
+		// the icon, so it wraps in the narrower space left beside it.
 		FontMetrics metrics = graphics.getFontMetrics();
 		List<String> titleLines = wrapText(header, MAX_TEXT_WIDTH, metrics);
 		int contentMax = MAX_TEXT_WIDTH - (icon != null ? iconWidth + ICON_GAP : 0);
 		List<String> goalLines = wrapText(goalName, contentMax, metrics);
 
-		// Size the panel to the actual widest rendered line (left-aligned).
+		// Size the panel to the actual widest rendered line (left-aligned). The
+		// whole goal-text block sits to the right of the icon, so its width is the
+		// widest goal line plus the icon column.
 		int widest = 0;
 		for (String line : titleLines) {
 			widest = Math.max(widest, metrics.stringWidth(line));
 		}
-		for (int i = 0; i < goalLines.size(); i++) {
-			int w = metrics.stringWidth(goalLines.get(i));
-			if (i == 0 && icon != null) {
-				w += iconWidth + ICON_GAP;
-			}
-			widest = Math.max(widest, w);
+		int goalTextWidth = 0;
+		for (String line : goalLines) {
+			goalTextWidth = Math.max(goalTextWidth, metrics.stringWidth(line));
 		}
+		int goalBlockWidth = goalTextWidth + (icon != null ? iconWidth + ICON_GAP : 0);
+		widest = Math.max(widest, goalBlockWidth);
 
 		panelComponent.getChildren().clear();
 		panelComponent.setPreferredSize(
@@ -118,22 +123,39 @@ public class NextGoalOverlay extends OverlayPanel {
 					.leftColor(TITLE_COLOR)
 					.build());
 		}
-		// Goal name: left-aligned line(s); the icon sits beside the first line.
-		for (int i = 0; i < goalLines.size(); i++) {
-			LineComponent line = LineComponent.builder().left(goalLines.get(i)).build();
-			if (i == 0 && icon != null) {
-				panelComponent.getChildren().add(SplitComponent.builder()
-						.first(new ImageComponent(icon))
-						.second(line)
-						.orientation(ComponentOrientation.HORIZONTAL)
-						.gap(new Point(ICON_GAP, 0))
-						.build());
-			} else {
-				panelComponent.getChildren().add(line);
-			}
+		// Breathing room between the title and the goal content below it.
+		panelComponent.getChildren().add(new ImageComponent(TITLE_CONTENT_SPACER));
+
+		// Goal name: the icon sits beside the whole (possibly multi-line) goal
+		// text, so wrapped lines like "from drops" align under the first line's
+		// text rather than dropping under the icon.
+		LayoutableRenderableEntity goalBlock = stackLines(goalLines);
+		if (icon != null) {
+			goalBlock = SplitComponent.builder()
+					.first(new ImageComponent(icon))
+					.second(goalBlock)
+					.orientation(ComponentOrientation.HORIZONTAL)
+					.gap(new Point(ICON_GAP, 0))
+					.build();
 		}
+		panelComponent.getChildren().add(goalBlock);
 
 		return super.render(graphics);
+	}
+
+	/** Stacks the goal lines vertically so they can share the icon's column as a
+	 * single block; wrapped lines then align under the first line's text. */
+	private static LayoutableRenderableEntity stackLines(List<String> lines) {
+		LayoutableRenderableEntity stacked =
+				LineComponent.builder().left(lines.get(lines.size() - 1)).build();
+		for (int i = lines.size() - 2; i >= 0; i--) {
+			stacked = SplitComponent.builder()
+					.first(LineComponent.builder().left(lines.get(i)).build())
+					.second(stacked)
+					.orientation(ComponentOrientation.VERTICAL)
+					.build();
+		}
+		return stacked;
 	}
 
 	/** Greedily word-wraps text into lines no wider than {@code maxWidth}. */
