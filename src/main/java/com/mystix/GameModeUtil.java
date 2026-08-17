@@ -17,15 +17,19 @@ public final class GameModeUtil {
 			WorldType.TOURNAMENT_WORLD,
 			WorldType.BETA_WORLD,
 			WorldType.NOSAVE_MODE,
-			WorldType.QUEST_SPEEDRUNNING);
+			WorldType.QUEST_SPEEDRUNNING,
+			// PvP Arena hands the player a temporary copy of their character
+			// whose varps (quest states, diary varbits, slayer points) are not
+			// the real account's.
+			WorldType.PVP_ARENA);
 
 	private GameModeUtil() {
 	}
 
 	/**
 	 * Returns true if the player is on a special game mode world (Leagues, DMM,
-	 * Fresh Start, Tournaments, Beta, Speedrunning) where syncing should be skipped
-	 * to avoid data conflicts with main game progression.
+	 * Fresh Start, Tournaments, Beta, Speedrunning, PvP Arena) where syncing
+	 * should be skipped to avoid data conflicts with main game progression.
 	 */
 	public static boolean isSpecialGameMode(Client client) {
 		EnumSet<WorldType> worldTypes = client.getWorldType();
