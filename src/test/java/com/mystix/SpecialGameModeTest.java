@@ -9,7 +9,8 @@ import static org.junit.Assert.*;
  * Tests for special game mode detection using WorldType enum.
  * Verifies that all special game mode world types are available for checking.
  * Special modes that should be excluded: SEASONAL, DEADMAN, FRESH_START_WORLD,
- * TOURNAMENT_WORLD, BETA_WORLD, NOSAVE_MODE, QUEST_SPEEDRUNNING.
+ * TOURNAMENT_WORLD, BETA_WORLD, NOSAVE_MODE, QUEST_SPEEDRUNNING, PVP_ARENA
+ * (a PvP Arena world hands the player a temporary copy of their character).
  */
 public class SpecialGameModeTest
 {
@@ -23,6 +24,7 @@ public class SpecialGameModeTest
 		assertNotNull("WorldType.BETA_WORLD should exist", WorldType.BETA_WORLD);
 		assertNotNull("WorldType.NOSAVE_MODE should exist", WorldType.NOSAVE_MODE);
 		assertNotNull("WorldType.QUEST_SPEEDRUNNING should exist", WorldType.QUEST_SPEEDRUNNING);
+		assertNotNull("WorldType.PVP_ARENA should exist", WorldType.PVP_ARENA);
 	}
 
 	@Test
@@ -48,7 +50,8 @@ public class SpecialGameModeTest
 			WorldType.TOURNAMENT_WORLD,
 			WorldType.BETA_WORLD,
 			WorldType.NOSAVE_MODE,
-			WorldType.QUEST_SPEEDRUNNING
+			WorldType.QUEST_SPEEDRUNNING,
+			WorldType.PVP_ARENA
 		};
 		
 		for (WorldType specialMode : specialModes)
