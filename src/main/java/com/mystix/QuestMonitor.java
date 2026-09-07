@@ -4,6 +4,7 @@ import com.google.gson.Gson;
 import com.mystix.api.MystixApiClient;
 import com.mystix.model.QuestsSyncPayload;
 import java.util.Map;
+import java.util.function.Consumer;
 import java.util.TreeMap;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
@@ -70,6 +71,27 @@ public class QuestMonitor {
 		this.apiClient = apiClient;
 		this.executorService = executorService;
 		this.gson = gson;
+	}
+
+	/** Receives every quest read (RuneLite quest name to status 0/1/2); set by the plugin. */
+	private volatile Consumer<Map<String, Integer>> statesListener;
+
+	public void setStatesListener(Consumer<Map<String, Integer>> listener) {
+		this.statesListener = listener;
+	}
+
+	/** Invoked after each upload so roadmap progress can be re-read; set by the plugin. */
+	private volatile Runnable syncedListener;
+
+	public void setSyncedListener(Runnable listener) {
+		this.syncedListener = listener;
+	}
+
+	private void notifySynced() {
+		Runnable listener = syncedListener;
+		if (listener != null) {
+			listener.run();
+		}
 	}
 
 	public void stop() {
@@ -143,6 +165,11 @@ public class QuestMonitor {
 			questStates.put(quest.getName(), toStatus(quest.getState(client)));
 		}
 
+		Consumer<Map<String, Integer>> states = statesListener;
+		if (states != null) {
+			states.accept(questStates);
+		}
+
 		QuestsSyncPayload payload = new QuestsSyncPayload(playerUsername, questStates);
 		String json = payload.toJson(gson);
 
@@ -153,6 +180,7 @@ public class QuestMonitor {
 		lastSyncJson = json;
 		log.debug("Syncing {} quests for player: {}", questStates.size(), playerUsername);
 		apiClient.sendQuestsSync(payload);
+		notifySynced();
 	}
 
 	/** Maps a RuneLite {@link QuestState} to the WikiSync status code (0/1/2). */

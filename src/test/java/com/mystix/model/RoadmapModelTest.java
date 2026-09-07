@@ -1,6 +1,7 @@
 package com.mystix.model;
 
 import com.google.gson.Gson;
+import java.time.Instant;
 import org.junit.Test;
 
 import static org.junit.Assert.assertEquals;
@@ -85,5 +86,36 @@ public class RoadmapModelTest {
 				"{\"id\":2,\"progress_percent\":null,\"is_complete\":false}", RoadmapGoal.class);
 		assertEquals("", binary.progressLabel());
 		assertFalse(binary.isComplete());
+	}
+
+	@Test
+	public void testCompletedAtParsesAndTolerates() {
+		assertEquals(Instant.parse("2026-09-07T12:34:56.123456Z"),
+				GSON.fromJson("{\"id\":1,\"completed_at\":\"2026-09-07T12:34:56.123456Z\"}", RoadmapGoal.class)
+						.getCompletedAt());
+		assertEquals(Instant.parse("2026-09-07T12:34:56Z"),
+				GSON.fromJson("{\"id\":1,\"completed_at\":\"2026-09-07T12:34:56+00:00\"}", RoadmapGoal.class)
+						.getCompletedAt());
+		assertNull(GSON.fromJson("{\"id\":1,\"completed_at\":null}", RoadmapGoal.class).getCompletedAt());
+		assertNull(GSON.fromJson("{\"id\":1}", RoadmapGoal.class).getCompletedAt());
+		assertNull(GSON.fromJson("{\"id\":1,\"completed_at\":\"\"}", RoadmapGoal.class).getCompletedAt());
+		assertNull(GSON.fromJson("{\"id\":1,\"completed_at\":\"not-a-date\"}", RoadmapGoal.class).getCompletedAt());
+		assertNull(GSON.fromJson("{\"id\":1,\"completed_at\":\"2026-09-07\"}", RoadmapGoal.class).getCompletedAt());
+	}
+
+	@Test
+	public void testImageUrlParses() {
+		assertEquals("https://oldschool.runescape.wiki/images/Tormented_Demon.png",
+				GSON.fromJson("{\"id\":1,\"image_url\":\"https://oldschool.runescape.wiki/images/Tormented_Demon.png\"}",
+						RoadmapGoal.class).getImageUrl());
+		assertNull(GSON.fromJson("{\"id\":1,\"image_url\":null}", RoadmapGoal.class).getImageUrl());
+	}
+
+	@Test
+	public void testNpcMetaParses() {
+		RoadmapGoal g = GSON.fromJson("{\"id\":1,\"meta\":{\"npc_id\":384,\"npc_name\":\"Guard\"}}", RoadmapGoal.class);
+		assertEquals(Integer.valueOf(384), g.getNpcId());
+		assertEquals("Guard", g.getNpcName());
+		assertNull(GSON.fromJson("{\"id\":1,\"meta\":{}}", RoadmapGoal.class).getNpcName());
 	}
 }

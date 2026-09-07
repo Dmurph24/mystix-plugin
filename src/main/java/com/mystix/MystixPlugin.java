@@ -115,6 +115,18 @@ public class MystixPlugin extends Plugin {
 	@Inject
 	private NextGoalOverlay nextGoalOverlay;
 
+	@Inject
+	private GoalProgressTracker goalProgressTracker;
+
+	@Inject
+	private GoalCompletionNotifier goalCompletionNotifier;
+
+	@Inject
+	private GoalCompletionOverlay goalCompletionOverlay;
+
+	@Inject
+	private GoalImageCache goalImageCache;
+
 	private RoadmapPanel roadmapPanel;
 	private NavigationButton navButton;
 
@@ -156,12 +168,36 @@ public class MystixPlugin extends Plugin {
 		eventBus.register(slayerMonitor);
 		eventBus.register(slayerCatalogMonitor);
 		eventBus.register(slayerRewardsMonitor);
+		eventBus.register(goalProgressTracker);
 
 		timerMonitor.start();
 		lootMonitor.start();
+		playerSkillsMonitor.start();
+
+		// Local goal progress: monitors report what they upload, the tracker
+		// layers it on the server's roadmap and asks for a re-read afterwards.
+		roadmapManager.setRoadmapListener(goalProgressTracker::onServerRoadmap);
+		roadmapManager.setRoadmapSetListener(goalProgressTracker::retainRoadmaps);
+		playerSkillsMonitor.setUploadListener(goalProgressTracker::onSkillsUploaded);
+		lootMonitor.setDropListener(goalProgressTracker::onLootDrop);
+		lootMonitor.setSyncedListener(goalProgressTracker::onSourceSynced);
+		collectionLogMonitor.setObtainedListener(goalProgressTracker::onCollectionLogItemObtained);
+		collectionLogMonitor.setSyncedListener(goalProgressTracker::onSourceSynced);
+		questMonitor.setSyncedListener(goalProgressTracker::onSourceSynced);
+		questMonitor.setStatesListener(goalProgressTracker::onQuestStates);
+		achievementDiaryMonitor.setSyncedListener(goalProgressTracker::onSourceSynced);
+		achievementDiaryMonitor.setReadListener(goalProgressTracker::onDiaryRead);
+		combatAchievementMonitor.setSyncedListener(goalProgressTracker::onSourceSynced);
+		combatAchievementMonitor.setCompletedListener(goalProgressTracker::onCombatTasksCompleted);
+		killCountMonitor.setSyncedListener(goalProgressTracker::onSourceSynced);
+		timerMonitor.setSyncedListener(goalProgressTracker::onSourceSynced);
+		timerMonitor.setTimersListener(goalProgressTracker::onFarmingTimers);
+		bankMemoryMonitor.setSyncedListener(goalProgressTracker::onSourceSynced);
+		bankMemoryMonitor.setPayloadListener(goalProgressTracker::onBankPayload);
+		roadmapManager.startPeriodicRefresh();
 
 		// Side-panel roadmap tab.
-		roadmapPanel = new RoadmapPanel(roadmapManager, executorService, this::forceSyncAll);
+		roadmapPanel = new RoadmapPanel(roadmapManager, goalProgressTracker);
 		BufferedImage icon = ImageUtil.loadImageResource(getClass(), "panel_icon.png");
 		navButton = NavigationButton.builder()
 				.tooltip("Mystix Roadmaps")
@@ -173,6 +209,8 @@ public class MystixPlugin extends Plugin {
 
 		// Next-goal game overlay (rendered only while showNextGoal is enabled).
 		overlayManager.add(nextGoalOverlay);
+		// Roadmap progress drawn under the goal completion popup while it shows.
+		overlayManager.add(goalCompletionOverlay);
 	}
 
 	@Override
@@ -193,6 +231,30 @@ public class MystixPlugin extends Plugin {
 		eventBus.unregister(slayerMonitor);
 		eventBus.unregister(slayerCatalogMonitor);
 		eventBus.unregister(slayerRewardsMonitor);
+		eventBus.unregister(goalProgressTracker);
+
+		roadmapManager.stopPeriodicRefresh();
+		roadmapManager.setRoadmapListener(null);
+		roadmapManager.setRoadmapSetListener(null);
+		roadmapManager.setPanelListener(null);
+		lootMonitor.setDropListener(null);
+		lootMonitor.setSyncedListener(null);
+		collectionLogMonitor.setObtainedListener(null);
+		collectionLogMonitor.setSyncedListener(null);
+		questMonitor.setSyncedListener(null);
+		questMonitor.setStatesListener(null);
+		achievementDiaryMonitor.setSyncedListener(null);
+		achievementDiaryMonitor.setReadListener(null);
+		combatAchievementMonitor.setSyncedListener(null);
+		combatAchievementMonitor.setCompletedListener(null);
+		killCountMonitor.setSyncedListener(null);
+		timerMonitor.setSyncedListener(null);
+		timerMonitor.setTimersListener(null);
+		bankMemoryMonitor.setSyncedListener(null);
+		bankMemoryMonitor.setPayloadListener(null);
+		goalCompletionNotifier.clear();
+		goalProgressTracker.clear();
+		goalImageCache.clear();
 
 		timerMonitor.stop();
 		playerSkillsMonitor.stop();
@@ -216,15 +278,16 @@ public class MystixPlugin extends Plugin {
 		}
 		roadmapPanel = null;
 		overlayManager.remove(nextGoalOverlay);
+		overlayManager.remove(goalCompletionOverlay);
 		roadmapManager.clear();
 		log.debug("Mystix stopped");
 	}
 
 	/**
 	 * Re-pushes every login sync the monitors normally send (timers, skills, bank,
-	 * loadout, loot). Used by the panel's "Sync &amp; refresh" button before the
-	 * backend recompute. Each monitor schedules its own work on the executor /
-	 * client thread, so this never blocks the caller (the EDT).
+	 * loadout, loot). Used when an App Key is entered mid-session. Each monitor
+	 * schedules its own work on the executor / client thread, so this never
+	 * blocks the caller.
 	 */
 	private void forceSyncAll() {
 		// This is an explicit user re-sync: clear the request-dedupe cache so an
@@ -288,7 +351,7 @@ public class MystixPlugin extends Plugin {
 		if (panel != null) {
 			SwingUtilities.invokeLater(panel::loadRoadmaps);
 		} else {
-			roadmapManager.refreshSelectedQuietly();
+			roadmapManager.refreshAllQuietly();
 		}
 	}
 

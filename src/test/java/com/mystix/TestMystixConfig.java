@@ -13,7 +13,10 @@ public class TestMystixConfig implements MystixConfig {
 	private boolean syncCombatAchievements = true;
 	private boolean syncKillCounts = true;
 	private boolean syncSlayer = true;
-	private boolean showNextGoal = false;
+	private boolean showNextGoal = true;
+	private boolean showGoalProgress = true;
+	private boolean showGoalPopup = true;
+	private GoalCompleteSound goalCompleteSound = GoalCompleteSound.IN_GAME;
 
 	@Override
 	public String mystixAppKey() {
@@ -103,5 +106,32 @@ public class TestMystixConfig implements MystixConfig {
 
 	public void setSyncSlayer(boolean syncSlayer) {
 		this.syncSlayer = syncSlayer;
+	}
+
+	@Override
+	public boolean showGoalProgress() {
+		return showGoalProgress;
+	}
+
+	public void setShowGoalProgress(boolean value) {
+		this.showGoalProgress = value;
+	}
+
+	@Override
+	public boolean showGoalPopup() {
+		return showGoalPopup;
+	}
+
+	public void setShowGoalPopup(boolean value) {
+		this.showGoalPopup = value;
+	}
+
+	@Override
+	public GoalCompleteSound goalCompleteSound() {
+		return goalCompleteSound;
+	}
+
+	public void setGoalCompleteSound(GoalCompleteSound value) {
+		this.goalCompleteSound = value;
 	}
 }

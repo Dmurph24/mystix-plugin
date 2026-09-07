@@ -5,6 +5,7 @@ import com.mystix.api.MystixApiClient;
 import com.mystix.model.AchievementDiariesSyncPayload;
 import com.mystix.model.DiaryTierResult;
 import java.util.Map;
+import java.util.function.Consumer;
 import javax.inject.Inject;
 import javax.inject.Singleton;
 import lombok.extern.slf4j.Slf4j;
@@ -62,6 +63,27 @@ public class AchievementDiaryMonitor {
 		this.apiClient = apiClient;
 		this.gson = gson;
 		this.reader = reader;
+	}
+
+	/** Receives every diary read (region to tier to positional results); set by the plugin. */
+	private volatile Consumer<Map<String, Map<String, DiaryTierResult>>> readListener;
+
+	public void setReadListener(Consumer<Map<String, Map<String, DiaryTierResult>>> listener) {
+		this.readListener = listener;
+	}
+
+	/** Invoked after each upload so roadmap progress can be re-read; set by the plugin. */
+	private volatile Runnable syncedListener;
+
+	public void setSyncedListener(Runnable listener) {
+		this.syncedListener = listener;
+	}
+
+	private void notifySynced() {
+		Runnable listener = syncedListener;
+		if (listener != null) {
+			listener.run();
+		}
 	}
 
 	public void stop() {
@@ -133,6 +155,10 @@ public class AchievementDiaryMonitor {
 		if (diaries.isEmpty()) {
 			return;  // spec failed to load; nothing to send
 		}
+		Consumer<Map<String, Map<String, DiaryTierResult>>> read = readListener;
+		if (read != null) {
+			read.accept(diaries);
+		}
 
 		AchievementDiariesSyncPayload payload =
 				new AchievementDiariesSyncPayload(playerUsername, diaries);
@@ -145,5 +171,6 @@ public class AchievementDiaryMonitor {
 		lastSyncJson = json;
 		log.debug("Syncing achievement diaries for player: {}", playerUsername);
 		apiClient.sendAchievementDiariesSync(payload);
+		notifySynced();
 	}
 }

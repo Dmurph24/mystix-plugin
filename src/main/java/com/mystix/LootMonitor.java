@@ -105,6 +105,45 @@ public class LootMonitor
 			this::flushDrops, FLUSH_INTERVAL_SECONDS, FLUSH_INTERVAL_SECONDS, TimeUnit.SECONDS);
 	}
 
+	/** Invoked after each upload so roadmap progress can be re-read; set by the plugin. */
+	private volatile Runnable syncedListener;
+
+	public void setSyncedListener(Runnable listener)
+	{
+		this.syncedListener = listener;
+	}
+
+	private void notifySynced()
+	{
+		Runnable listener = syncedListener;
+		if (listener != null)
+		{
+			listener.run();
+		}
+	}
+
+	/** Receives every loot drop the monitor queues for upload (set by the plugin). */
+	public interface DropListener
+	{
+		void onDrop(int npcId, String npcName, int kills, List<LootSyncPayload.LootItem> items);
+	}
+
+	private volatile DropListener dropListener;
+
+	public void setDropListener(DropListener listener)
+	{
+		this.dropListener = listener;
+	}
+
+	/**
+	 * Flushes queued drops on the background executor right away (a roadmap goal
+	 * just completed locally and the server should hear about it promptly).
+	 */
+	public void flushDropsNow()
+	{
+		executorService.execute(this::flushDrops);
+	}
+
 	public void stop()
 	{
 		if (flushTask != null)
@@ -252,6 +291,11 @@ public class LootMonitor
 		{
 			pendingDrops.add(payload);
 		}
+		DropListener listener = dropListener;
+		if (listener != null)
+		{
+			listener.onDrop(npcId, npcName, event.getAmount(), items);
+		}
 	}
 
 	/**
@@ -272,6 +316,7 @@ public class LootMonitor
 
 		log.debug("Flushing {} loot drops to API", dropsToSend.size());
 		apiClient.sendLootDrops(dropsToSend);
+		notifySynced();
 	}
 
 	/**
@@ -325,6 +370,7 @@ public class LootMonitor
 		LootSyncPayload payload = new LootSyncPayload(playerUsername, clientId, lootRecords);
 		log.debug("Syncing {} loot records for player: {}", lootRecords.size(), playerUsername);
 		apiClient.sendLootSync(payload);
+		notifySynced();
 
 		lastSyncHash = currentHash;
 		configManager.setRSProfileConfiguration("mystix", LAST_SYNC_HASH_KEY, currentHash);
