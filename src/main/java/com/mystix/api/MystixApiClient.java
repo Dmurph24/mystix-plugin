@@ -5,6 +5,7 @@ import com.google.gson.JsonSyntaxException;
 import com.mystix.MystixConfig;
 import com.mystix.SyncGuard;
 import com.mystix.model.AchievementDiariesSyncPayload;
+import com.mystix.model.HouseLocationSyncPayload;
 import com.mystix.model.BankSyncPayload;
 import com.mystix.model.CollectionLogSyncPayload;
 import com.mystix.model.CombatAchievementsSyncPayload;
@@ -56,6 +57,7 @@ public class MystixApiClient
 	private static final String COLLECTION_LOG_ENDPOINT = "/api/runelite/collection-log/";
 	private static final String QUESTS_ENDPOINT = "/api/runelite/quests/";
 	private static final String ACHIEVEMENT_DIARIES_ENDPOINT = "/api/runelite/achievement-diaries/";
+	private static final String HOUSE_LOCATION_ENDPOINT = "/api/runelite/house-location/";
 	private static final String COMBAT_ACHIEVEMENTS_ENDPOINT = "/api/runelite/combat-achievements/";
 	private static final String KILL_COUNTS_ENDPOINT = "/api/runelite/kill-counts/";
 	private static final String LOADOUT_ENDPOINT = "/api/runelite/loadouts/";
@@ -152,6 +154,13 @@ public class MystixApiClient
 		postAsync(ACHIEVEMENT_DIARIES_ENDPOINT, payload.toJson(gson), "achievement-diaries", false, true,
 			() -> log.debug("Mystix achievement diaries sync successful: {} regions for player: {}",
 				payload.getAchievementDiaries().size(), payload.getPlayerUsername()));
+	}
+
+	public void sendHouseLocationSync(HouseLocationSyncPayload payload)
+	{
+		postAsync(HOUSE_LOCATION_ENDPOINT, payload.toJson(gson), "house-location", false, true,
+			() -> log.debug("Mystix house location sync successful: varbit {} for player: {}",
+				payload.getHouseLocationVarbit(), payload.getPlayerUsername()));
 	}
 
 	public void sendCombatAchievementsSync(CombatAchievementsSyncPayload payload)

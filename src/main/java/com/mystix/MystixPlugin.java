@@ -71,6 +71,9 @@ public class MystixPlugin extends Plugin {
 	private AchievementDiaryMonitor achievementDiaryMonitor;
 
 	@Inject
+	private HouseLocationMonitor houseLocationMonitor;
+
+	@Inject
 	private CombatAchievementMonitor combatAchievementMonitor;
 
 	@Inject
@@ -163,6 +166,7 @@ public class MystixPlugin extends Plugin {
 		eventBus.register(collectionLogMonitor);
 		eventBus.register(questMonitor);
 		eventBus.register(achievementDiaryMonitor);
+		eventBus.register(houseLocationMonitor);
 		eventBus.register(combatAchievementMonitor);
 		eventBus.register(killCountMonitor);
 		eventBus.register(slayerMonitor);
@@ -226,6 +230,7 @@ public class MystixPlugin extends Plugin {
 		eventBus.unregister(collectionLogMonitor);
 		eventBus.unregister(questMonitor);
 		eventBus.unregister(achievementDiaryMonitor);
+		eventBus.unregister(houseLocationMonitor);
 		eventBus.unregister(combatAchievementMonitor);
 		eventBus.unregister(killCountMonitor);
 		eventBus.unregister(slayerMonitor);
@@ -266,6 +271,7 @@ public class MystixPlugin extends Plugin {
 		collectionLogMonitor.stop();
 		questMonitor.stop();
 		achievementDiaryMonitor.stop();
+		houseLocationMonitor.stop();
 		combatAchievementMonitor.stop();
 		killCountMonitor.stop();
 		slayerMonitor.stop();
@@ -302,6 +308,7 @@ public class MystixPlugin extends Plugin {
 		collectionLogMonitor.forceSync();
 		questMonitor.forceSync();
 		achievementDiaryMonitor.forceSync();
+		houseLocationMonitor.forceSync();
 		combatAchievementMonitor.forceSync();
 		killCountMonitor.forceSync();
 		slayerMonitor.forceSync();
