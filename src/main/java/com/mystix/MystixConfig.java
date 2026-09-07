@@ -134,6 +134,16 @@ public interface MystixConfig extends Config {
 		return true;
 	}
 
+	@ConfigItem(
+			keyName = "syncHouseLocation",
+			name = "House Location",
+			description = "Sync where your player-owned house is to Mystix so Farm Routes only suggest house teleports that land there. Reads on login and updates when you move house.",
+			section = SYNC_SECTION,
+			position = 10)
+	default boolean syncHouseLocation() {
+		return true;
+	}
+
 	// --- Plugin Features ---
 
 	@ConfigItem(
