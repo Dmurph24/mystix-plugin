@@ -102,10 +102,22 @@ public class MystixApiClient
 
 	public void sendPlayerSkillsSync(PlayerSkillsSyncPayload payload)
 	{
+		sendPlayerSkillsSync(payload, null);
+	}
+
+	/** Skills sync with a success callback (runs on the OkHttp thread). */
+	public void sendPlayerSkillsSync(PlayerSkillsSyncPayload payload, Runnable onSuccess)
+	{
 		// Never dedupe skills: the backend skills endpoint also triggers roadmap
 		// rechecks and WikiSync, so it must run even when the payload is unchanged.
 		postAsync(SKILLS_ENDPOINT, payload.toJson(gson), "skills", false, false,
-			() -> log.debug("Mystix player skills sync successful for player: {}", payload.getPlayer()));
+			() -> {
+				log.debug("Mystix player skills sync successful for player: {}", payload.getPlayer());
+				if (onSuccess != null)
+				{
+					onSuccess.run();
+				}
+			});
 	}
 
 	public void sendLoadoutSync(LoadoutSyncPayload payload)

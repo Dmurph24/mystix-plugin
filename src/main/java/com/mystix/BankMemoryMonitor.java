@@ -6,6 +6,7 @@ import com.mystix.model.BankSyncPayload;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Consumer;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
@@ -70,6 +71,7 @@ public class BankMemoryMonitor {
 		clientThread.invokeLater(() -> {
 			lastSyncJson = null;
 			BankSyncPayload payload = buildPayload();
+			notifyPayload(payload);
 			if (payload == null) {
 				return;
 			}
@@ -77,6 +79,34 @@ public class BankMemoryMonitor {
 			pendingPayload = payload;
 			flushPending();
 		});
+	}
+
+	/** Invoked after each upload so roadmap progress (net worth) can be re-read; set by the plugin. */
+	private volatile Runnable syncedListener;
+
+	public void setSyncedListener(Runnable listener) {
+		this.syncedListener = listener;
+	}
+
+	private void notifySynced() {
+		Runnable listener = syncedListener;
+		if (listener != null) {
+			listener.run();
+		}
+	}
+
+	/** Receives every payload the monitor builds (bank + inventory + equipment); set by the plugin. */
+	private volatile Consumer<BankSyncPayload> payloadListener;
+
+	public void setPayloadListener(Consumer<BankSyncPayload> listener) {
+		this.payloadListener = listener;
+	}
+
+	private void notifyPayload(BankSyncPayload payload) {
+		Consumer<BankSyncPayload> listener = payloadListener;
+		if (listener != null && payload != null) {
+			listener.accept(payload);
+		}
 	}
 
 	public void stop() {
@@ -111,6 +141,7 @@ public class BankMemoryMonitor {
 		}
 
 		BankSyncPayload payload = buildPayload();
+		notifyPayload(payload);
 		if (payload == null) {
 			return;
 		}
@@ -180,6 +211,7 @@ public class BankMemoryMonitor {
 		lastSyncJson = pendingJson;
 		log.debug("Syncing {} bank items for player: {}", pendingPayload.getTotalItemCount(), pendingPayload.getPlayerUsername());
 		apiClient.sendBankSync(pendingPayload);
+		notifySynced();
 		pendingPayload = null;
 		pendingJson = null;
 		pendingSync = null;

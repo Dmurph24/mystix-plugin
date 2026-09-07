@@ -1,5 +1,6 @@
 package com.mystix;
 
+import com.mystix.model.GoalType;
 import com.mystix.model.Roadmap;
 import com.mystix.model.RoadmapGoal;
 import java.awt.Color;
@@ -29,11 +30,15 @@ import net.runelite.client.ui.overlay.components.SplitComponent;
  * <p>Gated by {@link MystixConfig#showNextGoal()}. Reads the cached roadmap from
  * {@link RoadmapManager} (no network on the render thread) and renders a
  * "[roadmap name] - Current Goal" header above the goal name, with the goal's
- * item icon beside it when the goal targets an item. Renders nothing when
- * disabled, no app key, or no incomplete goal is available.
+ * item icon beside it when the goal targets an item, plus an app-style progress
+ * bar for measurable goals (see {@link GoalProgressBarComponent}). Renders
+ * nothing when disabled, no app key, or no incomplete goal is available.
  */
 public class NextGoalOverlay extends OverlayPanel {
 	private static final Color TITLE_COLOR = new Color(0xF2, 0x8C, 0x28); // Mystix orange
+	private static final Color MUTED_COLOR = new Color(0xA5, 0xA5, 0xA5);
+	/** Shown under goals only the server can move while a re-read is pending. */
+	private static final String SYNCING_TEXT = "Syncing with server...";
 
 	/** Horizontal padding added to the widest line so text never touches the edge. */
 	private static final int WIDTH_PADDING = 14;
@@ -49,8 +54,10 @@ public class NextGoalOverlay extends OverlayPanel {
 
 	private final MystixConfig config;
 	private final RoadmapManager roadmapManager;
+	private final GoalProgressTracker goalProgressTracker;
 	private final ItemManager itemManager;
 	private final SkillIconManager skillIconManager;
+	private final GoalImageCache goalImageCache;
 
 	// Cache the last icon (keyed by "item:<id>" / "skill:<name>") so we don't
 	// re-fetch every render frame.
@@ -59,11 +66,15 @@ public class NextGoalOverlay extends OverlayPanel {
 
 	@Inject
 	public NextGoalOverlay(MystixConfig config, RoadmapManager roadmapManager,
-			ItemManager itemManager, SkillIconManager skillIconManager) {
+			GoalProgressTracker goalProgressTracker,
+			ItemManager itemManager, SkillIconManager skillIconManager,
+			GoalImageCache goalImageCache) {
 		this.config = config;
 		this.roadmapManager = roadmapManager;
+		this.goalProgressTracker = goalProgressTracker;
 		this.itemManager = itemManager;
 		this.skillIconManager = skillIconManager;
+		this.goalImageCache = goalImageCache;
 		setPosition(OverlayPosition.TOP_LEFT);
 	}
 
@@ -77,10 +88,16 @@ public class NextGoalOverlay extends OverlayPanel {
 		if (roadmap == null) {
 			return null;
 		}
-		RoadmapGoal goal = roadmap.firstIncompleteGoal();
+		// The tracker's view includes goals completed locally this session, so
+		// the overlay advances the moment a goal is done rather than after the
+		// next server read.
+		RoadmapGoal goal = goalProgressTracker.firstIncompleteGoal(roadmap);
 		if (goal == null || goal.getName() == null) {
 			return null;
 		}
+		GoalProgressBarComponent bar = config.showGoalProgress()
+				? barFor(goalProgressTracker.progressFor(goal))
+				: null;
 
 		String title = roadmap.getTitle();
 		String header = (title == null || title.isEmpty())
@@ -111,6 +128,9 @@ public class NextGoalOverlay extends OverlayPanel {
 		}
 		int goalBlockWidth = goalTextWidth + (icon != null ? iconWidth + ICON_GAP : 0);
 		widest = Math.max(widest, goalBlockWidth);
+		if (bar != null) {
+			widest = Math.max(widest, bar.minWidth(metrics));
+		}
 
 		panelComponent.getChildren().clear();
 		panelComponent.setPreferredSize(
@@ -140,7 +160,37 @@ public class NextGoalOverlay extends OverlayPanel {
 		}
 		panelComponent.getChildren().add(goalBlock);
 
+		// Progress bar + "current / target" label for measurable goals.
+		if (bar != null) {
+			panelComponent.getChildren().add(bar);
+		}
+
+		// Server-driven goals (net worth, Tears of Guthix) only move on a server
+		// read: say so while one is pending so the wait is not mistaken for a stall.
+		if (goal.getType().isServerDriven() && roadmapManager.isSyncing()) {
+			panelComponent.getChildren().add(new ImageComponent(TITLE_CONTENT_SPACER));
+			panelComponent.getChildren().add(LineComponent.builder()
+					.left(SYNCING_TEXT)
+					.leftColor(MUTED_COLOR)
+					.build());
+			widest = Math.max(widest, metrics.stringWidth(SYNCING_TEXT));
+			panelComponent.setPreferredSize(
+					new Dimension(Math.max(MIN_WIDTH, widest + WIDTH_PADDING), 0));
+		}
+
 		return super.render(graphics);
+	}
+
+	/** The bar for a measurable goal, or null for binary goals (no bar). */
+	private static GoalProgressBarComponent barFor(GoalProgressView progress) {
+		if (!progress.isMeasurable()) {
+			return null;
+		}
+		String label = GoalProgressLabel.format(
+				progress.getType(), progress.getCurrent(), progress.getTarget(), progress.getPercent());
+		boolean grown = progress.getType() == GoalType.FARMING_TIMER && progress.getTarget() <= 1;
+		String percent = grown ? null : GoalProgressLabel.percent(progress.getPercent());
+		return new GoalProgressBarComponent(GoalProgressLabel.fraction(progress.getPercent()), label, percent);
 	}
 
 	/** Stacks the goal lines vertically so they can share the icon's column as a
@@ -182,7 +232,8 @@ public class NextGoalOverlay extends OverlayPanel {
 		return lines;
 	}
 
-	/** The goal's icon: an item sprite, a skill icon, or null when neither. */
+	/** The goal's icon: an item sprite, a skill icon, the server's artwork (bosses,
+	 * combat tasks) once it has loaded, or null when none is available. */
 	private BufferedImage iconFor(RoadmapGoal goal) {
 		Integer itemId = goal.getItemId();
 		if (itemId != null) {
@@ -192,7 +243,9 @@ public class NextGoalOverlay extends OverlayPanel {
 		if (skill != null) {
 			return cached("skill:" + skill.name(), () -> skillIconManager.getSkillImage(skill));
 		}
-		return null;
+		// Not memoised here: the cache returns null until the fetch completes,
+		// and its own lookup is a map read.
+		return goalImageCache.get(goal.getImageUrl());
 	}
 
 	/** Memoise the last icon so we don't re-fetch it every render frame. */

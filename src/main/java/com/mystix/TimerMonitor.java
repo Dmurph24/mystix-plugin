@@ -9,6 +9,7 @@ import java.time.ZoneOffset;
 import java.time.ZonedDateTime;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.function.Consumer;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
@@ -79,6 +80,27 @@ public class TimerMonitor {
 				TimeUnit.SECONDS);
 	}
 
+	/** Receives every recomputed timer set (farming, bird houses, ...); set by the plugin. */
+	private volatile Consumer<List<TimerSyncItem>> timersListener;
+
+	public void setTimersListener(Consumer<List<TimerSyncItem>> listener) {
+		this.timersListener = listener;
+	}
+
+	/** Invoked after each upload so roadmap progress can be re-read; set by the plugin. */
+	private volatile Runnable syncedListener;
+
+	public void setSyncedListener(Runnable listener) {
+		this.syncedListener = listener;
+	}
+
+	private void notifySynced() {
+		Runnable listener = syncedListener;
+		if (listener != null) {
+			listener.run();
+		}
+	}
+
 	public void stop() {
 		if (scheduledFuture != null) {
 			scheduledFuture.cancel(false);
@@ -122,6 +144,8 @@ public class TimerMonitor {
 		tearsOfGuthixNextReset = completionDayStart.plusDays(TEARS_OF_GUTHIX_RESET_DAYS).toInstant();
 		lastSentSnapshot = null;
 		log.debug("Tears of Guthix completed; next reset at {}", tearsOfGuthixNextReset);
+		// Push it now rather than waiting for the periodic sync.
+		executorService.execute(this::sync);
 	}
 
 	/**
@@ -162,11 +186,17 @@ public class TimerMonitor {
 		collectBirdHouseTimers(timers, playerUsername, syncEnabled);
 		collectTearsOfGuthixTimer(timers, playerUsername, syncEnabled);
 
+		Consumer<List<TimerSyncItem>> listener = timersListener;
+		if (listener != null) {
+			listener.accept(timers);
+		}
+
 		String snapshot = TimersSyncPayload.toJson(timers);
 		if (!snapshot.equals(lastSentSnapshot)) {
 			lastSentSnapshot = snapshot;
 			log.debug("Mystix syncing {} timer(s) for {}", timers.size(), playerUsername);
 			apiClient.sendTimersSync(timers);
+			notifySynced();
 		}
 	}
 

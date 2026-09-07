@@ -75,6 +75,20 @@ public class KillCountMonitor {
 		this.gson = gson;
 	}
 
+	/** Invoked after each upload so roadmap progress can be re-read; set by the plugin. */
+	private volatile Runnable syncedListener;
+
+	public void setSyncedListener(Runnable listener) {
+		this.syncedListener = listener;
+	}
+
+	private void notifySynced() {
+		Runnable listener = syncedListener;
+		if (listener != null) {
+			listener.run();
+		}
+	}
+
 	public void stop() {
 		previousGameState = GameState.UNKNOWN;
 		kcCheckPending = false;
@@ -172,5 +186,6 @@ public class KillCountMonitor {
 		lastSyncJson = json;
 		log.debug("Syncing {} kill counts for player: {}", killCounts.size(), playerUsername);
 		apiClient.sendKillCountsSync(payload);
+		notifySynced();
 	}
 }

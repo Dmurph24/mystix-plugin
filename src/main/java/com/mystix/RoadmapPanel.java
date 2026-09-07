@@ -9,12 +9,15 @@ import java.awt.BasicStroke;
 import java.awt.BorderLayout;
 import java.awt.Color;
 import java.awt.Component;
+import java.awt.Cursor;
 import java.awt.Dimension;
 import java.awt.Graphics;
 import java.awt.Graphics2D;
 import java.awt.Insets;
 import java.awt.Rectangle;
 import java.awt.RenderingHints;
+import java.awt.event.MouseAdapter;
+import java.awt.event.MouseEvent;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -22,8 +25,6 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.TimeUnit;
 import javax.swing.BorderFactory;
 import javax.swing.Box;
 import javax.swing.BoxLayout;
@@ -48,19 +49,12 @@ import net.runelite.client.ui.PluginPanel;
  * Side-panel tab listing the player's roadmaps and their goals.
  *
  * <p>Lets the user pick a roadmap (players may have several), shows each goal's
- * name + progress, and offers a "Sync &amp; refresh" button that re-pushes the
- * plugin's login syncs, recomputes the selected roadmap on the backend, and
- * re-renders. All network callbacks are marshalled back to the EDT.
+ * name + progress, and offers a "Refresh" button that reloads the roadmaps from
+ * the app. Goal progress itself updates live from game events and syncs in the
+ * background. All network callbacks are marshalled back to the EDT.
  */
 @Slf4j
 public class RoadmapPanel extends PluginPanel {
-	/**
-	 * Delay between firing the data syncs and asking the backend to recompute, so
-	 * the freshly synced data has a chance to be ingested and committed first.
-	 * Matches the ~10s wait the mobile app's refresh uses.
-	 */
-	private static final int RECOMPUTE_DELAY_SECONDS = 10;
-
 	private static final Color COMPLETE_COLOR = new Color(0x4C, 0xAF, 0x50);
 	private static final Color DELETE_COLOR = new Color(0xC0, 0x4A, 0x4A);
 
@@ -73,27 +67,24 @@ public class RoadmapPanel extends PluginPanel {
 	/** Where an elbow branches into a card (px from the card top, ~the name line). */
 	private static final int CONNECTOR_Y_OFFSET = 14;
 	private static final Color GUIDE_COLOR = new Color(0x5A, 0x5A, 0x5A);
+	/** Chevrons for the collapsed / expanded "Completed" header. */
+	private static final String COLLAPSED_GLYPH = "+";
+	private static final String EXPANDED_GLYPH = "-";
 
 	private final RoadmapManager roadmapManager;
-	private final ScheduledExecutorService executor;
-	private final Runnable forceSyncAll;
+	private final GoalProgressTracker goalProgressTracker;
 
 	private final JComboBox<RoadmapSummary> roadmapSelector = new JComboBox<>();
-	private final JButton syncButton = new JButton("Check for completions");
-	private final JButton reloadButton = new JButton("Load Roadmaps from App");
+	private final JButton reloadButton = new JButton("Refresh");
 	private final JLabel statusLabel = new JLabel();
 	private final GoalsTreePanel goalsPanel = new GoalsTreePanel();
 
 	private boolean suppressSelectorEvents = false;
 
-	public RoadmapPanel(
-			RoadmapManager roadmapManager,
-			ScheduledExecutorService executor,
-			Runnable forceSyncAll) {
+	public RoadmapPanel(RoadmapManager roadmapManager, GoalProgressTracker goalProgressTracker) {
 		super(false);
 		this.roadmapManager = roadmapManager;
-		this.executor = executor;
-		this.forceSyncAll = forceSyncAll;
+		this.goalProgressTracker = goalProgressTracker;
 
 		setLayout(new BorderLayout());
 		setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
@@ -146,16 +137,9 @@ public class RoadmapPanel extends PluginPanel {
 		header.add(roadmapSelector);
 		header.add(Box.createVerticalStrut(8));
 
-		syncButton.setAlignmentX(Component.LEFT_ALIGNMENT);
-		syncButton.setMaximumSize(new Dimension(Integer.MAX_VALUE, 30));
-		syncButton.setToolTipText(
-				"Re-send your latest data and recompute the selected roadmap.");
-		syncButton.addActionListener(e -> onSyncAndRefresh());
-		header.add(syncButton);
-		header.add(Box.createVerticalStrut(4));
-
 		reloadButton.setAlignmentX(Component.LEFT_ALIGNMENT);
-		reloadButton.setMaximumSize(new Dimension(Integer.MAX_VALUE, 24));
+		reloadButton.setMaximumSize(new Dimension(Integer.MAX_VALUE, 26));
+		reloadButton.setToolTipText("Reload your roadmaps and goals from the Mystix app.");
 		reloadButton.addActionListener(e -> loadRoadmaps());
 		header.add(reloadButton);
 		header.add(Box.createVerticalStrut(8));
@@ -171,9 +155,8 @@ public class RoadmapPanel extends PluginPanel {
 		JPanel notePanel = new JPanel(new BorderLayout());
 		notePanel.setBorder(BorderFactory.createEmptyBorder(10, 0, 0, 0));
 		JLabel note = new JLabel(
-				"<html><body style='width:170px'><i>Tip: logging out and back in helps "
-				+ "push your latest progress. A completed goal can take a few minutes "
-				+ "to update.</i></body></html>");
+				"<html><body style='width:170px'><i>Progress updates as you play and "
+				+ "syncs with the app in the background.</i></body></html>");
 		note.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
 		note.setFont(FontManager.getRunescapeSmallFont());
 		notePanel.add(note, BorderLayout.CENTER);
@@ -182,8 +165,21 @@ public class RoadmapPanel extends PluginPanel {
 
 	@Override
 	public void onActivate() {
-		// Refresh whenever the panel is opened so it always shows current data.
+		// Refresh whenever the panel is opened so it always shows current data,
+		// and re-render whenever a background refresh brings a newer roadmap.
+		roadmapManager.setPanelActive(true);
+		roadmapManager.setPanelListener(
+				roadmap -> SwingUtilities.invokeLater(() -> {
+					syncSelector(roadmap.getCollectionId());
+					renderGoals(roadmap);
+				}));
 		loadRoadmaps();
+	}
+
+	@Override
+	public void onDeactivate() {
+		roadmapManager.setPanelListener(null);
+		roadmapManager.setPanelActive(false);
 	}
 
 	/** Loads the roadmap list and (re)populates the selector. Called on panel open. */
@@ -208,6 +204,22 @@ public class RoadmapPanel extends PluginPanel {
 				});
 			}
 		});
+	}
+
+	/** Points the dropdown at a roadmap the plugin switched to in the background. */
+	private void syncSelector(int collectionId) {
+		RoadmapSummary current = (RoadmapSummary) roadmapSelector.getSelectedItem();
+		if (current != null && current.getCollectionId() == collectionId) {
+			return;
+		}
+		for (int i = 0; i < roadmapSelector.getItemCount(); i++) {
+			if (roadmapSelector.getItemAt(i).getCollectionId() == collectionId) {
+				suppressSelectorEvents = true;
+				roadmapSelector.setSelectedIndex(i);
+				suppressSelectorEvents = false;
+				return;
+			}
+		}
 	}
 
 	private void populateSelector(List<RoadmapSummary> roadmaps) {
@@ -271,47 +283,6 @@ public class RoadmapPanel extends PluginPanel {
 				});
 	}
 
-	private void onSyncAndRefresh() {
-		RoadmapSummary selected = (RoadmapSummary) roadmapSelector.getSelectedItem();
-		if (selected == null) {
-			setStatus("Select a roadmap first.");
-			return;
-		}
-		if (roadmapManager.getPlayerUsername() == null) {
-			setStatus("Log in to OSRS to sync.");
-			return;
-		}
-
-		syncButton.setEnabled(false);
-		setStatus("Syncing your data...");
-
-		// 1. Re-push all the login syncs (timers, skills, bank, loadout, loot).
-		forceSyncAll.run();
-
-		// 2. After the syncs have had a chance to land, recompute and re-render.
-		executor.schedule(() -> {
-			SwingUtilities.invokeLater(() -> setStatus("Recomputing roadmap..."));
-			roadmapManager.recomputeRoadmap(selected.getCollectionId(),
-					new MystixApiClient.RoadmapCallback<Roadmap>() {
-						@Override
-						public void onSuccess(Roadmap result) {
-							SwingUtilities.invokeLater(() -> {
-								setStatus("Up to date.");
-								renderGoals(result);
-								syncButton.setEnabled(true);
-							});
-						}
-
-						@Override
-						public void onError(String message) {
-							SwingUtilities.invokeLater(() -> {
-								setStatus(message);
-								syncButton.setEnabled(true);
-							});
-						}
-					});
-		}, RECOMPUTE_DELAY_SECONDS, TimeUnit.SECONDS);
-	}
 
 	private void renderGoals(Roadmap roadmap) {
 		goalsPanel.removeAll();
@@ -322,34 +293,111 @@ public class RoadmapPanel extends PluginPanel {
 			empty.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
 			goalsPanel.add(empty);
 		} else {
-			Map<Integer, RoadmapGoal> byId = new HashMap<>();
-			for (RoadmapGoal g : goals) {
-				byId.put(g.getId(), g);
+			// Finished goals leave the tree the moment they complete and collect
+			// in a collapsible list below.
+			GoalPartition split = GoalPartition.of(goals,
+					goalProgressTracker::isComplete, goalProgressTracker::completedThisSession);
+			if (split.getTree().isEmpty()) {
+				JLabel allDone = new JLabel("All goals completed.");
+				allDone.setForeground(COMPLETE_COLOR);
+				allDone.setFont(FontManager.getRunescapeSmallFont());
+				goalsPanel.add(allDone);
+			} else {
+				renderTree(split.getTree());
 			}
-			// Order so each goal follows its prerequisites, then indent by depth
-			// (the longest prerequisite chain), mirroring the app's tree layout.
-			List<RoadmapGoal> ordered = new ArrayList<>();
-			Set<Integer> visited = new HashSet<>();
-			for (RoadmapGoal g : goals) {
-				orderByPrereqs(g, byId, visited, ordered, new HashSet<>());
-			}
-			Map<Integer, Integer> depthMemo = new HashMap<>();
-			int[] depths = new int[ordered.size()];
-			for (int i = 0; i < ordered.size(); i++) {
-				depths[i] = prereqDepth(ordered.get(i), byId, depthMemo, new HashSet<>());
-			}
-			Guide[][] guides = computeGuides(depths);
-			List<RowGuide> rowGuides = new ArrayList<>();
-			for (int i = 0; i < ordered.size(); i++) {
-				JComponent rowComp = indentRow(buildGoalRow(ordered.get(i), depths[i]), depths[i]);
-				goalsPanel.add(rowComp);
+			if (!split.getCompleted().isEmpty()) {
 				goalsPanel.add(Box.createVerticalStrut(ROW_GAP));
-				rowGuides.add(new RowGuide(rowComp, guides[i]));
+				goalsPanel.add(buildCompletedSection(split.getCompleted()));
 			}
-			goalsPanel.setRowGuides(rowGuides);
 		}
 		goalsPanel.revalidate();
 		goalsPanel.repaint();
+	}
+
+	/** Draws the dependency tree for the given goals (prerequisites first, indented by depth). */
+	private void renderTree(List<RoadmapGoal> tree) {
+		Map<Integer, RoadmapGoal> byId = new HashMap<>();
+		for (RoadmapGoal g : tree) {
+			byId.put(g.getId(), g);
+		}
+		// Order so each goal follows its prerequisites, then indent by depth
+		// (the longest prerequisite chain), mirroring the app's tree layout.
+		// Prerequisites missing from the tree (completed ones) are simply skipped.
+		List<RoadmapGoal> ordered = new ArrayList<>();
+		Set<Integer> visited = new HashSet<>();
+		for (RoadmapGoal g : tree) {
+			orderByPrereqs(g, byId, visited, ordered, new HashSet<>());
+		}
+		Map<Integer, Integer> depthMemo = new HashMap<>();
+		int[] depths = new int[ordered.size()];
+		for (int i = 0; i < ordered.size(); i++) {
+			depths[i] = prereqDepth(ordered.get(i), byId, depthMemo, new HashSet<>());
+		}
+		Guide[][] guides = computeGuides(depths);
+		List<RowGuide> rowGuides = new ArrayList<>();
+		for (int i = 0; i < ordered.size(); i++) {
+			JComponent rowComp = indentRow(buildGoalRow(ordered.get(i), depths[i]), depths[i]);
+			goalsPanel.add(rowComp);
+			goalsPanel.add(Box.createVerticalStrut(ROW_GAP));
+			rowGuides.add(new RowGuide(rowComp, guides[i]));
+		}
+		goalsPanel.setRowGuides(rowGuides);
+	}
+
+	/**
+	 * "Completed (N)" header that toggles a flat, newest-first list of finished
+	 * goals. The expanded state is remembered across sessions via the manager.
+	 * Lives inside the scrolling goals panel so it scrolls with the tree.
+	 */
+	private JPanel buildCompletedSection(List<RoadmapGoal> completed) {
+		JPanel list = new JPanel();
+		list.setLayout(new BoxLayout(list, BoxLayout.Y_AXIS));
+		list.setOpaque(false);
+		list.setAlignmentX(Component.LEFT_ALIGNMENT);
+		for (RoadmapGoal g : completed) {
+			list.add(buildGoalRow(g, 0)); // flat: no indent, no connectors
+			list.add(Box.createVerticalStrut(ROW_GAP));
+		}
+		boolean expanded = roadmapManager.isCompletedGoalsExpanded();
+		list.setVisible(expanded);
+
+		JLabel arrow = new JLabel(expanded ? EXPANDED_GLYPH : COLLAPSED_GLYPH);
+		arrow.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
+		JLabel title = new JLabel("Completed (" + completed.size() + ")");
+		title.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
+		title.setFont(FontManager.getRunescapeBoldFont());
+
+		JPanel header = new JPanel();
+		header.setLayout(new BoxLayout(header, BoxLayout.X_AXIS));
+		header.setOpaque(false);
+		header.setAlignmentX(Component.LEFT_ALIGNMENT);
+		header.setBorder(BorderFactory.createEmptyBorder(6, 0, 6, 0));
+		header.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+		header.setToolTipText("Show or hide completed goals");
+		header.add(arrow);
+		header.add(Box.createHorizontalStrut(6));
+		header.add(title);
+		header.add(Box.createHorizontalGlue());
+		header.setMaximumSize(new Dimension(Integer.MAX_VALUE, header.getPreferredSize().height));
+		header.addMouseListener(new MouseAdapter() {
+			@Override
+			public void mouseClicked(MouseEvent e) {
+				boolean show = !list.isVisible();
+				roadmapManager.setCompletedGoalsExpanded(show);
+				list.setVisible(show);
+				arrow.setText(show ? EXPANDED_GLYPH : COLLAPSED_GLYPH);
+				goalsPanel.revalidate();
+				goalsPanel.repaint();
+			}
+		});
+
+		JPanel section = new JPanel();
+		section.setLayout(new BoxLayout(section, BoxLayout.Y_AXIS));
+		section.setOpaque(false);
+		section.setAlignmentX(Component.LEFT_ALIGNMENT);
+		section.add(header);
+		section.add(list);
+		return section;
 	}
 
 	/**
@@ -454,19 +502,42 @@ public class RoadmapPanel extends PluginPanel {
 		// Width-constrained HTML so the full goal name wraps instead of truncating;
 		// narrow the wrap width to match the card shrinking as it indents.
 		int wrapWidth = Math.max(80, NAME_WRAP_WIDTH - depth * INDENT_PER_DEPTH);
+		// Local progress (kills, drops, XP seen this session) layered on the
+		// server's numbers, so the card matches the overlay.
+		GoalProgressView progress = goalProgressTracker.progressFor(goal);
+		boolean complete = progress.isComplete();
 		JLabel name = new JLabel(wrapGoalName(goalName(goal), wrapWidth));
-		name.setForeground(goal.isComplete() ? COMPLETE_COLOR : Color.WHITE);
+		name.setForeground(complete ? COMPLETE_COLOR : Color.WHITE);
 		name.setFont(FontManager.getRunescapeSmallFont());
 		name.setAlignmentX(Component.LEFT_ALIGNMENT);
 		row.add(name);
 
-		if (goal.isComplete()) {
+		if (complete) {
 			JLabel done = new JLabel("Completed");
 			done.setForeground(COMPLETE_COLOR);
 			done.setFont(FontManager.getRunescapeSmallFont());
 			done.setAlignmentX(Component.LEFT_ALIGNMENT);
 			row.add(Box.createVerticalStrut(4));
 			row.add(done);
+		} else if (progress.isMeasurable()) {
+			row.add(Box.createVerticalStrut(5));
+			row.add(new GoalProgressBar(GoalProgressLabel.fraction(progress.getPercent())));
+			row.add(Box.createVerticalStrut(3));
+			JLabel progressLabel = new JLabel(GoalProgressLabel.format(
+					progress.getType(), progress.getCurrent(), progress.getTarget(), progress.getPercent()));
+			progressLabel.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
+			progressLabel.setFont(FontManager.getRunescapeSmallFont());
+			progressLabel.setAlignmentX(Component.LEFT_ALIGNMENT);
+			row.add(progressLabel);
+		}
+		if (!complete && progress.getType().isServerDriven() && roadmapManager.isSyncing()) {
+			// Only a server read can move this goal; show that one is on its way.
+			JLabel syncing = new JLabel("Syncing with server...");
+			syncing.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
+			syncing.setFont(FontManager.getRunescapeSmallFont());
+			syncing.setAlignmentX(Component.LEFT_ALIGNMENT);
+			row.add(Box.createVerticalStrut(3));
+			row.add(syncing);
 		}
 
 		// Action row: "Mark complete" (incomplete goals only) + "Delete".
@@ -474,7 +545,7 @@ public class RoadmapPanel extends PluginPanel {
 		actions.setLayout(new BoxLayout(actions, BoxLayout.X_AXIS));
 		actions.setBackground(ColorScheme.DARKER_GRAY_COLOR);
 		actions.setAlignmentX(Component.LEFT_ALIGNMENT);
-		if (!goal.isComplete()) {
+		if (!complete) {
 			JButton markComplete = new JButton("Mark complete");
 			markComplete.setFont(FontManager.getRunescapeSmallFont());
 			markComplete.setMargin(new Insets(2, 6, 2, 6));

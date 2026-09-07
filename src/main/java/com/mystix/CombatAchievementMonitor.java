@@ -6,6 +6,7 @@ import com.mystix.model.CombatAchievementsSyncPayload;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
+import java.util.function.Consumer;
 import java.util.Set;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
@@ -88,6 +89,27 @@ public class CombatAchievementMonitor {
 		this.gson = gson;
 	}
 
+	/** Receives every read of the completed in-game task ids; set by the plugin. */
+	private volatile Consumer<List<Integer>> completedListener;
+
+	public void setCompletedListener(Consumer<List<Integer>> listener) {
+		this.completedListener = listener;
+	}
+
+	/** Invoked after each upload so roadmap progress can be re-read; set by the plugin. */
+	private volatile Runnable syncedListener;
+
+	public void setSyncedListener(Runnable listener) {
+		this.syncedListener = listener;
+	}
+
+	private void notifySynced() {
+		Runnable listener = syncedListener;
+		if (listener != null) {
+			listener.run();
+		}
+	}
+
 	public void stop() {
 		previousGameState = GameState.UNKNOWN;
 		caCheckPending = false;
@@ -167,6 +189,11 @@ public class CombatAchievementMonitor {
 			}
 		}
 
+		Consumer<List<Integer>> listener = completedListener;
+		if (listener != null) {
+			listener.accept(completed);
+		}
+
 		CombatAchievementsSyncPayload payload =
 				new CombatAchievementsSyncPayload(playerUsername, completed);
 		String json = payload.toJson(gson);
@@ -178,5 +205,6 @@ public class CombatAchievementMonitor {
 		lastSyncJson = json;
 		log.debug("Syncing {} combat achievements for player: {}", completed.size(), playerUsername);
 		apiClient.sendCombatAchievementsSync(payload);
+		notifySynced();
 	}
 }

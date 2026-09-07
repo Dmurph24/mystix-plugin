@@ -3,7 +3,6 @@ package com.mystix;
 import org.junit.Test;
 
 import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
 /**
@@ -47,9 +46,18 @@ public class MystixConfigTest
 	}
 
 	@Test
-	public void testDefaultShowNextGoalIsFalse()
+	public void testDefaultShowNextGoalIsTrue()
 	{
-		// The overlay is opt-in; off by default.
-		assertFalse(new TestMystixConfig().showNextGoal());
+		// The overlay is on by default, matching MystixConfig.showNextGoal().
+		assertTrue(new TestMystixConfig().showNextGoal());
+	}
+
+	@Test
+	public void testDefaultGoalFeaturesAreOn()
+	{
+		TestMystixConfig config = new TestMystixConfig();
+		assertTrue(config.showGoalProgress());
+		assertTrue(config.showGoalPopup());
+		assertEquals(GoalCompleteSound.IN_GAME, config.goalCompleteSound());
 	}
 }
