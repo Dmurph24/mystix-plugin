@@ -129,8 +129,11 @@ final class GoalProgressState {
 		Integer sequence;
 		/** Combat achievement goals: the in-game task id. */
 		Integer taskId;
-		/** Owned-item goals: holdings when the goal was created (gain baseline). */
+		/** Owned-item goals: holdings when the goal was created (gain baseline),
+		 * and the banked parts as the server last saw them. */
 		Integer startQty;
+		Integer serverHeldBank;
+		int serverHeldVaults;
 		/** Farming goals: when the goal was created (crops planted after count), and its matchers. */
 		Instant createdAt;
 		Integer farmItemId;
@@ -162,12 +165,14 @@ final class GoalProgressState {
 	private final Map<String, Integer> liveXp = new HashMap<>();
 	private final Map<String, Integer> uploadedXp = new HashMap<>();
 	private final Map<Integer, LocalGoal> goals = new HashMap<>();
-	/** Quantities held per canonical item id, per container source ("bank",
-	 * "inventory", "equipment", vaults). Summed for owned-item goals. */
-	private final Map<String, Map<Integer, Integer>> heldBySource = new HashMap<>();
-	/** True once a full bank upload has been seen this session, so a held total
-	 * can be trusted over the server's number. */
-	private boolean bankSnapshotSeen;
+	/** Live inventory and equipment quantities per canonical item id (from
+	 * container changes), and the bank proper from this session's last bank
+	 * upload. Owned-item goals add the server's banked parts to these. */
+	private final Map<Integer, Integer> liveInventory = new HashMap<>();
+	private final Map<Integer, Integer> liveEquipment = new HashMap<>();
+	private Map<Integer, Integer> localBank;
+	/** True once the client has reported its inventory this session. */
+	private boolean inventorySeen;
 
 	/** Latest farming / bird house timers the plugin computed (any timer type). */
 	private List<TimerSyncItem> farmingTimers = Collections.emptyList();
@@ -364,23 +369,28 @@ final class GoalProgressState {
 	}
 
 	/**
-	 * Quantities held in one or more container sources, keyed by canonical item
-	 * id. A bank upload carries bank + inventory + equipment; live container
-	 * changes carry just their own source. Owned-item goals complete when
-	 * held - start reaches the goal's gain.
-	 *
-	 * @param fromBankUpload true when the sources come from a full bank upload
+	 * The client's live inventory or equipment (canonical item id to quantity).
+	 * Owned-item goals move on every change: picking up or cutting items raises
+	 * them, dropping or alching lowers them.
 	 */
-	synchronized void onHeldQuantities(Map<String, Map<Integer, Integer>> bySource, boolean fromBankUpload) {
-		if (bySource == null || bySource.isEmpty()) {
-			return;
+	synchronized void onInventoryChanged(boolean equipment, Map<Integer, Integer> quantities) {
+		Map<Integer, Integer> target = equipment ? liveEquipment : liveInventory;
+		target.clear();
+		if (quantities != null) {
+			target.putAll(quantities);
 		}
-		for (Map.Entry<String, Map<Integer, Integer>> e : bySource.entrySet()) {
-			heldBySource.put(e.getKey(), e.getValue() == null ? Collections.emptyMap() : new HashMap<>(e.getValue()));
-		}
-		if (fromBankUpload) {
-			bankSnapshotSeen = true;
-		}
+		inventorySeen = true;
+		checkOwned();
+	}
+
+	/** This session's bank upload: the bank proper, which supersedes the
+	 * server's banked figure until the next server read catches up. */
+	synchronized void onBankSnapshot(Map<Integer, Integer> bankQuantities) {
+		localBank = bankQuantities == null ? new HashMap<>() : new HashMap<>(bankQuantities);
+		checkOwned();
+	}
+
+	private void checkOwned() {
 		List<RoadmapGoal> completed = new ArrayList<>();
 		for (LocalGoal lg : goals.values()) {
 			if (lg.type != GoalType.ITEM_OWNED || lg.isComplete() || lg.itemId == null) {
@@ -397,23 +407,25 @@ final class GoalProgressState {
 		}
 	}
 
-	/** Total held of an item across every known source. */
-	private int heldOf(int itemId) {
-		int total = 0;
-		for (Map<Integer, Integer> source : heldBySource.values()) {
-			Integer qty = source.get(itemId);
-			if (qty != null) {
-				total += Math.max(0, qty);
-			}
+	/** Held right now: banked parts (this session's bank snapshot when there is
+	 * one, else the server's) plus live inventory and equipment. Null until
+	 * the client has reported its inventory. */
+	private Integer heldNow(LocalGoal lg) {
+		if (!inventorySeen || lg.itemId == null || lg.serverHeldBank == null) {
+			return null;
 		}
-		return total;
+		int bank = localBank != null ? localBank.getOrDefault(lg.itemId, 0) : lg.serverHeldBank;
+		return bank + lg.serverHeldVaults
+				+ liveInventory.getOrDefault(lg.itemId, 0)
+				+ liveEquipment.getOrDefault(lg.itemId, 0);
 	}
 
 	private boolean ownedReached(LocalGoal lg) {
-		if (lg.serverTarget <= 0 || lg.startQty == null) {
+		Integer held = heldNow(lg);
+		if (held == null || lg.serverTarget <= 0 || lg.startQty == null) {
 			return false;
 		}
-		return heldOf(lg.itemId) - lg.startQty >= lg.serverTarget;
+		return held - lg.startQty >= lg.serverTarget;
 	}
 
 	/**
@@ -563,6 +575,10 @@ final class GoalProgressState {
 			lg.taskId = lg.type == GoalType.COMBAT_ACHIEVEMENT ? g.getTaskId() : null;
 			lg.createdAt = g.getCreatedAt();
 			lg.startQty = g.getStartQty();
+			lg.serverHeldBank = g.getHeldBank();
+			lg.serverHeldVaults = g.getHeldVaults() == null ? 0 : g.getHeldVaults();
+			// A fresh server read includes any bank upload made before it.
+			localBank = null;
 			lg.farmItemId = lg.type == GoalType.FARMING_TIMER ? g.getOsrsItemId() : null;
 			lg.farmTimerType = g.getTimerType();
 			lg.farmEntity = g.getEntity();
@@ -614,8 +630,10 @@ final class GoalProgressState {
 		uploadedXp.clear();
 		lastFastPathAtMs = Long.MIN_VALUE;
 		farmingTimers = Collections.emptyList();
-		heldBySource.clear();
-		bankSnapshotSeen = false;
+		liveInventory.clear();
+		liveEquipment.clear();
+		localBank = null;
+		inventorySeen = false;
 		for (LocalGoal lg : goals.values()) {
 			lg.localDelta = 0;
 			lg.locallyComplete = false;
@@ -662,14 +680,13 @@ final class GoalProgressState {
 			return new GoalProgressView(type, current, target, complete ? 100 : percent(current, target), complete);
 		}
 		if (type == GoalType.ITEM_OWNED) {
-			if (lg.itemId == null || lg.startQty == null || heldBySource.isEmpty()) {
+			Integer held = heldNow(lg);
+			if (held == null || lg.startQty == null) {
 				return new GoalProgressView(type, lg.serverCurrent, target,
 						lg.isComplete() ? Integer.valueOf(100) : goal.getProgressPercent(), lg.isComplete());
 			}
-			int gained = Math.max(0, heldOf(lg.itemId) - lg.startQty);
-			// Without a bank upload this session only inventory / gear are known,
-			// so never show less than the server does.
-			int current = bankSnapshotSeen ? gained : Math.max(lg.serverCurrent, gained);
+			// Exact and live: goes down again if the items are dropped or used.
+			int current = Math.max(0, held - lg.startQty);
 			boolean complete = lg.isComplete() || ownedReached(lg);
 			return new GoalProgressView(type, current, target, complete ? 100 : percent(current, target), complete);
 		}

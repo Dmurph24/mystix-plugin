@@ -79,14 +79,15 @@ public class GoalProgressTracker implements GoalProgressState.SyncHooks {
 		state.onSkillXp(event.getSkill().getName(), event.getXp());
 	}
 
-	/** Inventory and equipment changes keep owned-item goals live between bank visits. */
+	/** Inventory and equipment changes keep owned-item goals exact between bank
+	 * visits: cutting or picking up raises them, dropping lowers them. */
 	@Subscribe
 	public void onItemContainerChanged(ItemContainerChanged event) {
-		String source;
+		boolean equipment;
 		if (event.getContainerId() == InventoryID.INVENTORY.getId()) {
-			source = "inventory";
+			equipment = false;
 		} else if (event.getContainerId() == InventoryID.EQUIPMENT.getId()) {
-			source = "equipment";
+			equipment = true;
 		} else {
 			return;
 		}
@@ -100,26 +101,24 @@ public class GoalProgressTracker implements GoalProgressState.SyncHooks {
 				quantities.merge(canonicalItemId(item.getId()), item.getQuantity(), Integer::sum);
 			}
 		}
-		Map<String, Map<Integer, Integer>> bySource = new HashMap<>();
-		bySource.put(source, quantities);
-		state.onHeldQuantities(bySource, false);
+		state.onInventoryChanged(equipment, quantities);
 	}
 
-	/** A bank upload (bank + inventory + equipment, or a vault) was built; ids are
-	 * folded onto their unnoted item so noted stacks count as the item. */
+	/** A bank upload was built: its bank section becomes this session's bank
+	 * snapshot (ids folded onto the unnoted item). Inventory is tracked live. */
 	public void onBankPayload(BankSyncPayload payload) {
 		if (payload == null) {
 			return;
 		}
-		Map<String, Map<Integer, Integer>> bySource = new HashMap<>();
-		for (Map.Entry<String, List<BankSyncPayload.BankItem>> e : payload.getItems().entrySet()) {
-			Map<Integer, Integer> quantities = new HashMap<>();
-			for (BankSyncPayload.BankItem item : e.getValue()) {
-				quantities.merge(canonicalItemId(item.getItemId()), item.getQuantity(), Integer::sum);
-			}
-			bySource.put(e.getKey(), quantities);
+		List<BankSyncPayload.BankItem> bank = payload.getItems().get(BankMemoryMonitor.SOURCE_BANK);
+		if (bank == null) {
+			return;
 		}
-		state.onHeldQuantities(bySource, payload.getItems().containsKey("bank"));
+		Map<Integer, Integer> quantities = new HashMap<>();
+		for (BankSyncPayload.BankItem item : bank) {
+			quantities.merge(canonicalItemId(item.getItemId()), item.getQuantity(), Integer::sum);
+		}
+		state.onBankSnapshot(quantities);
 	}
 
 	/** Noted items map to their unnoted item id (client thread). */
@@ -264,7 +263,9 @@ public class GoalProgressTracker implements GoalProgressState.SyncHooks {
 
 	@Override
 	public void forceBankSync() {
-		bankMemoryMonitor.forceSync();
+		// Inventory and gear (plus the bank when it was opened this session) so
+		// the server can confirm without waiting for a bank visit.
+		bankMemoryMonitor.syncInventoryNow();
 	}
 
 	@Override

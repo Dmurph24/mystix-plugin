@@ -518,38 +518,58 @@ public class GoalProgressStateTest {
 		assertTrue(v.isComplete());
 	}
 
-	private static Map<String, Map<Integer, Integer>> held(String source, int itemId, int qty) {
+	private static Map<Integer, Integer> qty(int itemId, int q) {
 		Map<Integer, Integer> m = new HashMap<>();
-		m.put(itemId, qty);
-		Map<String, Map<Integer, Integer>> by = new HashMap<>();
-		by.put(source, m);
-		return by;
+		m.put(itemId, q);
+		return m;
 	}
 
 	@Test
-	public void ownedItemGoalTracksHoldingsAcrossSources() {
-		// Started with 40 held; wants 100 more. Server has counted 0 so far.
-		Roadmap r = roadmap(1, goalJson(1, "item_owned", 0, 100, false, "{\"item_id\":1511,\"start_qty\":40}"));
+	public void ownedItemGoalIsExactAndRevertsWhenItemsAreDropped() {
+		// Started with 40 held (30 banked, 10 in inventory); wants 100 more.
+		Roadmap r = roadmap(1, goalJson(1, "item_owned", 0, 100, false,
+				"{\"item_id\":1511,\"start_qty\":40,\"held_bank\":30,\"held_vaults\":0}"));
 		state.onServerRoadmap(r);
+		// Nothing known live yet: server passthrough.
 		assertEquals(0, state.progressFor(goal(r, 1)).getCurrent());
 
-		// Only the inventory is known so far: never show less than the server.
-		state.onHeldQuantities(held("inventory", 1511, 20), false);
+		// Login reports the inventory: 10 logs -> 40 held -> 0 gained.
+		state.onInventoryChanged(false, qty(1511, 10));
 		assertEquals(0, state.progressFor(goal(r, 1)).getCurrent());
 
-		// Bank upload: 30 banked + 20 in inventory = 50 held -> 10 gained.
-		Map<String, Map<Integer, Integer>> upload = held("bank", 1511, 30);
-		upload.putAll(held("inventory", 1511, 20));
-		state.onHeldQuantities(upload, true);
+		// Cut 60 logs: inventory 70 -> 100 held -> 60 gained.
+		state.onInventoryChanged(false, qty(1511, 70));
+		assertEquals(60, state.progressFor(goal(r, 1)).getCurrent());
+
+		// Drop 20: back to 40 gained. No completion, no forced sync.
+		state.onInventoryChanged(false, qty(1511, 50));
+		assertEquals(40, state.progressFor(goal(r, 1)).getCurrent());
+		assertEquals(0, hooks.bankSyncs);
+
+		// Bank them: this session's bank snapshot (80) replaces the server's 30
+		// and the inventory empties. Still 40 gained, not double counted.
+		state.onBankSnapshot(qty(1511, 80));
+		state.onInventoryChanged(false, new HashMap<>());
+		assertEquals(40, state.progressFor(goal(r, 1)).getCurrent());
+
+		// Cut 60 more: 140 held -> complete, forced sync, popup once.
+		state.onInventoryChanged(false, qty(1511, 60));
 		GoalProgressView v = state.progressFor(goal(r, 1));
-		assertEquals(10, v.getCurrent());
-		assertEquals(Integer.valueOf(10), v.getPercent());
-
-		// Cut logs: inventory grows to 110 -> 140 held -> 100 gained -> complete.
-		state.onHeldQuantities(held("inventory", 1511, 110), false);
-		assertTrue(state.progressFor(goal(r, 1)).isComplete());
+		assertTrue(v.isComplete());
+		assertEquals(100, v.getCurrent());
 		assertEquals(1, hooks.bankSyncs);
 		assertEquals(Collections.singletonList(1), hooks.completedGoalIds);
+	}
+
+	@Test
+	public void ownedItemGoalCountsVaultsAndEquipment() {
+		Roadmap r = roadmap(1, goalJson(1, "item_owned", 0, 10, false,
+				"{\"item_id\":4151,\"start_qty\":2,\"held_bank\":1,\"held_vaults\":1}"));
+		state.onServerRoadmap(r);
+		state.onInventoryChanged(false, new HashMap<>());
+		state.onInventoryChanged(true, qty(4151, 1));
+		// 1 bank + 1 vault + 1 worn = 3 held -> 1 gained.
+		assertEquals(1, state.progressFor(goal(r, 1)).getCurrent());
 	}
 
 	@Test

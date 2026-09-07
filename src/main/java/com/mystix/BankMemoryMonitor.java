@@ -14,7 +14,9 @@ import javax.inject.Inject;
 import javax.inject.Singleton;
 import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.Client;
+import net.runelite.api.GameState;
 import net.runelite.api.ItemContainer;
+import net.runelite.api.events.GameStateChanged;
 import net.runelite.api.events.ItemContainerChanged;
 import net.runelite.api.gameval.InventoryID;
 import net.runelite.client.callback.ClientThread;
@@ -40,6 +42,7 @@ public class BankMemoryMonitor {
 	private String lastSyncJson = null;
 	private String pendingJson = null;
 	private BankSyncPayload pendingPayload = null;
+	private GameState previousGameState = GameState.UNKNOWN;
 	private ScheduledFuture<?> pendingSync = null;
 
 	@Inject
@@ -109,6 +112,44 @@ public class BankMemoryMonitor {
 		}
 	}
 
+	/**
+	 * Uploads the inventory and equipment right away (and the bank too when it
+	 * has been opened this session). The backend replaces sources one at a
+	 * time, so an inventory-only upload leaves the stored bank untouched. Used
+	 * when an owned-item goal completes locally and on logout, where the bank
+	 * is usually unknown but the inventory is the part that changed.
+	 */
+	public void syncInventoryNow() {
+		clientThread.invokeLater(() -> {
+			BankSyncPayload payload = buildPayload(true);
+			notifyPayload(payload);
+			if (payload == null) {
+				return;
+			}
+			lastSyncJson = null;
+			pendingJson = payload.toJson(gson);
+			pendingPayload = payload;
+			flushPending();
+		});
+	}
+
+	@Subscribe
+	public void onGameStateChanged(GameStateChanged event) {
+		GameState newState = event.getGameState();
+		if (previousGameState == GameState.LOGGED_IN && newState != GameState.LOGGED_IN) {
+			// Containers are still readable on the transition; push the parts
+			// that changed since the last bank visit.
+			BankSyncPayload payload = buildPayload(true);
+			if (payload != null) {
+				lastSyncJson = null;
+				pendingJson = payload.toJson(gson);
+				pendingPayload = payload;
+				flushPending();
+			}
+		}
+		previousGameState = newState;
+	}
+
 	public void stop() {
 		if (pendingSync != null) {
 			pendingSync.cancel(false);
@@ -174,6 +215,15 @@ public class BankMemoryMonitor {
 	 * client thread.
 	 */
 	private BankSyncPayload buildPayload() {
+		return buildPayload(false);
+	}
+
+	/**
+	 * @param inventoryOnlyOk when the bank has not been opened this session,
+	 *                        still build a payload with just inventory + gear
+	 *                        (otherwise a missing bank yields null)
+	 */
+	private BankSyncPayload buildPayload(boolean inventoryOnlyOk) {
 		if (GameModeUtil.isSpecialGameMode(client)) {
 			log.debug("Bank sync skipped: special game mode detected");
 			return null;
@@ -186,19 +236,20 @@ public class BankMemoryMonitor {
 		}
 
 		ItemContainer bankContainer = client.getItemContainer(InventoryID.BANK);
-		if (bankContainer == null) {
+		if (bankContainer == null && !inventoryOnlyOk) {
 			return null;
 		}
-
-		Map<Integer, Integer> bankQuantities = new LinkedHashMap<>();
-		ItemCollector.collectBankItems(bankContainer, itemManager, bankQuantities);
 
 		Map<Integer, Integer> invQuantities = new LinkedHashMap<>();
 		collectContainerItems(InventoryID.INV, invQuantities);
 		collectContainerItems(InventoryID.WORN, invQuantities);
 
 		Map<String, List<BankSyncPayload.BankItem>> itemsBySource = new LinkedHashMap<>();
-		itemsBySource.put(SOURCE_BANK, ItemCollector.toBankItemList(bankQuantities));
+		if (bankContainer != null) {
+			Map<Integer, Integer> bankQuantities = new LinkedHashMap<>();
+			ItemCollector.collectBankItems(bankContainer, itemManager, bankQuantities);
+			itemsBySource.put(SOURCE_BANK, ItemCollector.toBankItemList(bankQuantities));
+		}
 		itemsBySource.put(SOURCE_INVENTORY, ItemCollector.toBankItemList(invQuantities));
 
 		return new BankSyncPayload(playerUsername, itemsBySource);

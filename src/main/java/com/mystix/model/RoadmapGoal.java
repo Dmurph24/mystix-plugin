@@ -153,6 +153,12 @@ public class RoadmapGoal {
 
 		@SerializedName("start_qty")
 		private Integer startQty;
+
+		@SerializedName("held_bank")
+		private Integer heldBank;
+
+		@SerializedName("held_vaults")
+		private Integer heldVaults;
 	}
 
 	public String getGoalType() {
@@ -231,6 +237,16 @@ public class RoadmapGoal {
 	/** Owned-item goals: how many the player held when the goal was created. */
 	public Integer getStartQty() {
 		return meta == null ? null : meta.startQty;
+	}
+
+	/** Owned-item goals: quantity in the bank proper at the server's last upload. */
+	public Integer getHeldBank() {
+		return meta == null ? null : meta.heldBank;
+	}
+
+	/** Owned-item goals: quantity in vaults (seed vault, looting bag, potion storage). */
+	public Integer getHeldVaults() {
+		return meta == null ? null : meta.heldVaults;
 	}
 
 	/** Farming goals: the produce item id the goal matches timers by; null otherwise. */
