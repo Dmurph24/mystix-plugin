@@ -37,7 +37,7 @@ public class HouseLocationMonitor {
 	private final DiarySyncTrigger trigger = new DiarySyncTrigger();
 
 	private GameState previousGameState = GameState.UNKNOWN;
-	private Integer lastSentValue;
+	private String lastSyncJson;
 
 	@Inject
 	public HouseLocationMonitor(
@@ -56,7 +56,7 @@ public class HouseLocationMonitor {
 	public void stop() {
 		previousGameState = GameState.UNKNOWN;
 		trigger.reset();
-		lastSentValue = null;
+		lastSyncJson = null;
 	}
 
 	/**
@@ -69,7 +69,7 @@ public class HouseLocationMonitor {
 			if (client.getGameState() != GameState.LOGGED_IN || !trigger.isBaselineSynced()) {
 				return;
 			}
-			lastSentValue = null;
+			lastSyncJson = null;
 			syncHouseLocation();
 		});
 	}
@@ -121,12 +121,16 @@ public class HouseLocationMonitor {
 			// No house (or not loaded yet): never overwrite a manual pick with "unknown".
 			return;
 		}
-		if (lastSentValue != null && lastSentValue == value) {
+		HouseLocationSyncPayload payload = new HouseLocationSyncPayload(playerUsername, value);
+		String json = payload.toJson(gson);
+		// Dedup on the whole payload (username included), so switching to another
+		// account whose house happens to share the same id still syncs.
+		if (json.equals(lastSyncJson)) {
 			log.debug("House location unchanged, skipping sync");
 			return;
 		}
-		lastSentValue = value;
+		lastSyncJson = json;
 		log.debug("Syncing house location {} for player: {}", value, playerUsername);
-		apiClient.sendHouseLocationSync(new HouseLocationSyncPayload(playerUsername, value));
+		apiClient.sendHouseLocationSync(payload);
 	}
 }
