@@ -3,9 +3,15 @@ package com.mystix;
 import com.google.gson.Gson;
 import com.mystix.api.MystixApiClient;
 import com.mystix.model.QuestsSyncPayload;
+import java.util.Arrays;
+import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.function.Consumer;
 import java.util.TreeMap;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import javax.inject.Inject;
@@ -18,6 +24,9 @@ import net.runelite.api.QuestState;
 import net.runelite.api.events.GameStateChanged;
 import net.runelite.api.events.GameTick;
 import net.runelite.api.events.VarbitChanged;
+import net.runelite.api.events.WidgetLoaded;
+import net.runelite.api.gameval.InterfaceID;
+import net.runelite.api.widgets.Widget;
 import net.runelite.client.callback.ClientThread;
 import net.runelite.client.eventbus.Subscribe;
 
@@ -35,6 +44,12 @@ import net.runelite.client.eventbus.Subscribe;
  * varp, so we mark a re-check on {@link VarbitChanged} and read+dedupe on the next
  * {@link GameTick} (throttled), which collapses varp churn to at most one read per few
  * ticks. A JSON equality check means an unchanged quest set is never resent.
+ *
+ * <p>A quest RuneLite's {@link Quest} enum doesn't list yet (a brand-new release) is
+ * invisible to that read, so the quest-complete scroll is watched too: it names any
+ * quest, and a name read from it is carried as completed in every later payload this
+ * login session. The scroll text is parsed the way RuneLite's own screenshot plugin
+ * parses it.
  */
 @Slf4j
 @Singleton
@@ -45,6 +60,17 @@ public class QuestMonitor {
 	// a few ticks, and login/logout syncs are the safety net.
 	private static final int RESYNC_THROTTLE_TICKS = 3;
 
+	// "You have completed The Corsair Curse!" / "'One Small Favour' completed!"
+	private static final Pattern QUEST_PATTERN_1 = Pattern.compile(
+			".+?ve\\.*? (?<verb>been|rebuilt|.+?ed)? ?(?:the )?'?(?<quest>.+?)'?(?: [Qq]uest)?[!.]?$");
+	private static final Pattern QUEST_PATTERN_2 = Pattern.compile(
+			"'?(?<quest>.+?)'?(?: [Qq]uest)? (?<verb>[a-z]\\w+?ed)?(?: f.*?)?[!.]?$");
+	// Recipe for Disaster subquests announce "You have freed/defeated/saved ...".
+	private static final List<String> RFD_TAGS = Arrays.asList("Another Cook", "freed", "defeated", "saved");
+	// Quests whose name ends in "Quest", which the patterns strip.
+	private static final List<String> WORD_QUEST_IN_NAME_TAGS = Arrays.asList(
+			"Another Cook", "Doric", "Heroes", "Legends", "Observatory", "Olaf", "Waterfall");
+
 	private final Client client;
 	private final ClientThread clientThread;
 	private final MystixConfig config;
@@ -54,6 +80,9 @@ public class QuestMonitor {
 
 	private GameState previousGameState = GameState.UNKNOWN;
 	private boolean questCheckPending;
+	private boolean questScrollPending;
+	/** Quest names read from the quest-complete scroll this login session. */
+	private final Set<String> completedFromScroll = new HashSet<>();
 	private int lastReadTick = -1;
 	private String lastSyncJson;
 
@@ -97,6 +126,8 @@ public class QuestMonitor {
 	public void stop() {
 		previousGameState = GameState.UNKNOWN;
 		questCheckPending = false;
+		questScrollPending = false;
+		completedFromScroll.clear();
 		lastReadTick = -1;
 		lastSyncJson = null;
 	}
@@ -124,7 +155,19 @@ public class QuestMonitor {
 			// Logging out: flush final state (this handler runs on the client thread).
 			syncQuests();
 		}
+		if (newState == GameState.LOGIN_SCREEN) {
+			// Scroll completions belong to the account that was logged in.
+			completedFromScroll.clear();
+		}
 		previousGameState = newState;
+	}
+
+	/** The quest-complete scroll opened; read its title once its text is set. */
+	@Subscribe
+	public void onWidgetLoaded(WidgetLoaded event) {
+		if (event.getGroupId() == InterfaceID.QUESTSCROLL) {
+			questScrollPending = true;
+		}
 	}
 
 	/** A quest state change flips a varp; mark a re-check for the next game tick. */
@@ -135,6 +178,10 @@ public class QuestMonitor {
 
 	@Subscribe
 	public void onGameTick(GameTick event) {
+		if (questScrollPending) {
+			questScrollPending = false;
+			readQuestScroll();
+		}
 		if (!questCheckPending) {
 			return;
 		}
@@ -144,6 +191,54 @@ public class QuestMonitor {
 		questCheckPending = false;
 		lastReadTick = client.getTickCount();
 		syncQuests();
+	}
+
+	/** Reads the quest name off the quest-complete scroll and syncs it as completed. */
+	private void readQuestScroll() {
+		Widget title = client.getWidget(InterfaceID.Questscroll.QUEST_TITLE);
+		String name = title == null ? null : parseQuestCompletedScroll(title.getText());
+		if (name == null) {
+			return;
+		}
+		log.debug("Quest complete scroll names '{}'", name);
+		if (completedFromScroll.add(name)) {
+			questCheckPending = false;
+			lastReadTick = client.getTickCount();
+			syncQuests();
+		}
+	}
+
+	/**
+	 * The quest named by the quest-complete scroll's title text, or null when the text
+	 * isn't a completion. Mirrors RuneLite's screenshot plugin: Recipe for Disaster
+	 * subquests are prefixed, and names the scroll shortens get their "Quest" back.
+	 */
+	static String parseQuestCompletedScroll(String text) {
+		if (text == null) {
+			return null;
+		}
+		Matcher m1 = QUEST_PATTERN_1.matcher(text);
+		Matcher m2 = QUEST_PATTERN_2.matcher(text);
+		Matcher match = m1.matches() ? m1 : m2;
+		if (!match.matches()) {
+			return null;
+		}
+		String quest = match.group("quest");
+		String verb = match.group("verb") != null ? match.group("verb") : "";
+		if (verb.contains("kind of")) {
+			return null; // a partial completion is not a completion
+		}
+		if (verb.contains("completely")) {
+			quest += " II";
+		}
+		String questAndVerb = quest + verb;
+		if (RFD_TAGS.stream().anyMatch(questAndVerb::contains)) {
+			quest = "Recipe for Disaster - " + quest;
+		}
+		if (WORD_QUEST_IN_NAME_TAGS.stream().anyMatch(quest::contains)) {
+			quest += " Quest";
+		}
+		return quest;
 	}
 
 	/** Reads all quest states, builds the payload, and syncs (deduped). Client thread only. */
@@ -163,6 +258,10 @@ public class QuestMonitor {
 		Map<String, Integer> questStates = new TreeMap<>();
 		for (Quest quest : Quest.values()) {
 			questStates.put(quest.getName(), toStatus(quest.getState(client)));
+		}
+		// Completions the enum can't see yet; the enum's own read wins for names it has.
+		for (String name : completedFromScroll) {
+			questStates.putIfAbsent(name, 2);
 		}
 
 		Consumer<Map<String, Integer>> states = statesListener;

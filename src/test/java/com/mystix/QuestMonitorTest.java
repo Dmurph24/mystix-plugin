@@ -1,6 +1,8 @@
 package com.mystix;
 
+import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
 import org.junit.Before;
@@ -35,5 +37,29 @@ public class QuestMonitorTest {
 
 		config.setSyncQuests(true);
 		assertTrue(config.syncQuests());
+	}
+
+	@Test
+	public void scrollNamesAQuestTheEnumDoesNotKnow() {
+		assertEquals("A Ruff Situation",
+				QuestMonitor.parseQuestCompletedScroll("You have completed A Ruff Situation!"));
+		assertEquals("The Corsair Curse",
+				QuestMonitor.parseQuestCompletedScroll("You have completed The Corsair Curse!"));
+		assertEquals("One Small Favour",
+				QuestMonitor.parseQuestCompletedScroll("'One Small Favour' completed!"));
+	}
+
+	@Test
+	public void scrollRestoresQuestWordAndRfdPrefix() {
+		assertEquals("Doric's Quest",
+				QuestMonitor.parseQuestCompletedScroll("You have completed Doric's Quest!"));
+		assertEquals("Recipe for Disaster - Mountain Dwarf",
+				QuestMonitor.parseQuestCompletedScroll("You have freed the Mountain Dwarf!"));
+	}
+
+	@Test
+	public void scrollIgnoresNonCompletions() {
+		assertNull(QuestMonitor.parseQuestCompletedScroll(null));
+		assertNull(QuestMonitor.parseQuestCompletedScroll("You have kind of completed the Cook's Assistant!"));
 	}
 }
