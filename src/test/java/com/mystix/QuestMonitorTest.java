@@ -62,4 +62,13 @@ public class QuestMonitorTest {
 		assertNull(QuestMonitor.parseQuestCompletedScroll(null));
 		assertNull(QuestMonitor.parseQuestCompletedScroll("You have kind of completed the Cook's Assistant!"));
 	}
+
+	@Test
+	public void questTableStatusMirrorsRuneLitesEnumRead() {
+		// QUEST_STATUS_GET returns 2 finished, 1 not started, anything else in progress.
+		assertEquals(2, QuestMonitor.statusFromScript(2));
+		assertEquals(0, QuestMonitor.statusFromScript(1));
+		assertEquals(1, QuestMonitor.statusFromScript(0));
+		assertEquals(1, QuestMonitor.statusFromScript(3));
+	}
 }
