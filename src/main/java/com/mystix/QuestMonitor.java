@@ -23,8 +23,11 @@ import net.runelite.api.Quest;
 import net.runelite.api.QuestState;
 import net.runelite.api.events.GameStateChanged;
 import net.runelite.api.events.GameTick;
+import net.runelite.api.events.ScriptCallbackEvent;
 import net.runelite.api.events.VarbitChanged;
 import net.runelite.api.events.WidgetLoaded;
+import net.runelite.api.ScriptID;
+import net.runelite.api.gameval.DBTableID;
 import net.runelite.api.gameval.InterfaceID;
 import net.runelite.api.widgets.Widget;
 import net.runelite.client.callback.ClientThread;
@@ -46,10 +49,13 @@ import net.runelite.client.eventbus.Subscribe;
  * ticks. A JSON equality check means an unchanged quest set is never resent.
  *
  * <p>A quest RuneLite's {@link Quest} enum doesn't list yet (a brand-new release) is
- * invisible to that read, so the quest-complete scroll is watched too: it names any
- * quest, and a name read from it is carried as completed in every later payload this
- * login session. The scroll text is parsed the way RuneLite's own screenshot plugin
- * parses it.
+ * invisible to that read, so two more sources fill the gap. The game builds its quest
+ * list from a database table and RuneLite's client fires a {@code questFilter} script
+ * callback for each row it lays out; the row ids collected there give every quest's
+ * display name and, through the same script the enum uses, its state. And the
+ * quest-complete scroll names any quest as it finishes, so a name read from it is
+ * carried as completed for the rest of the login session. The scroll text is parsed
+ * the way RuneLite's own screenshot plugin parses it.
  */
 @Slf4j
 @Singleton
@@ -83,6 +89,8 @@ public class QuestMonitor {
 	private boolean questScrollPending;
 	/** Quest names read from the quest-complete scroll this login session. */
 	private final Set<String> completedFromScroll = new HashSet<>();
+	/** Quest table row ids seen while the game laid out its quest list. */
+	private final Set<Integer> questRows = new HashSet<>();
 	private int lastReadTick = -1;
 	private String lastSyncJson;
 
@@ -128,6 +136,7 @@ public class QuestMonitor {
 		questCheckPending = false;
 		questScrollPending = false;
 		completedFromScroll.clear();
+		questRows.clear();
 		lastReadTick = -1;
 		lastSyncJson = null;
 	}
@@ -160,6 +169,27 @@ public class QuestMonitor {
 			completedFromScroll.clear();
 		}
 		previousGameState = newState;
+	}
+
+	/**
+	 * The game lays out its quest list from the quest table, and RuneLite's client
+	 * calls back once per row with the row id on top of the int stack (the row below it
+	 * is the hide flag, left untouched). Rows are only collected here; names and states
+	 * are read on the next sync.
+	 */
+	@Subscribe
+	public void onScriptCallbackEvent(ScriptCallbackEvent event) {
+		if (!"questFilter".equals(event.getEventName())) {
+			return;
+		}
+		int[] intStack = client.getIntStack();
+		int size = client.getIntStackSize();
+		if (size < 1) {
+			return;
+		}
+		if (questRows.add(intStack[size - 1])) {
+			questCheckPending = true;
+		}
 	}
 
 	/** The quest-complete scroll opened; read its title once its text is set. */
@@ -259,6 +289,14 @@ public class QuestMonitor {
 		for (Quest quest : Quest.values()) {
 			questStates.put(quest.getName(), toStatus(quest.getState(client)));
 		}
+		// Quests the enum doesn't list, read from the game's own quest table; the
+		// enum's read wins for names it has.
+		for (int row : questRows) {
+			String name = questRowName(row);
+			if (name != null && !questStates.containsKey(name)) {
+				questStates.put(name, questRowStatus(row));
+			}
+		}
 		// Completions the enum can't see yet; the enum's own read wins for names it has.
 		for (String name : completedFromScroll) {
 			questStates.putIfAbsent(name, 2);
@@ -280,6 +318,34 @@ public class QuestMonitor {
 		log.debug("Syncing {} quests for player: {}", questStates.size(), playerUsername);
 		apiClient.sendQuestsSync(payload);
 		notifySynced();
+	}
+
+	/** A quest row's display name, or null when the row can't be read. */
+	private String questRowName(int row) {
+		try {
+			Object[] field = client.getDBTableField(row, DBTableID.Quest.COL_DISPLAYNAME, 0);
+			return field != null && field.length > 0 && field[0] instanceof String ? (String) field[0] : null;
+		} catch (RuntimeException e) {
+			log.debug("Quest row {} has no readable name", row, e);
+			return null;
+		}
+	}
+
+	/** A quest row's status (0/1/2), read the same way {@link Quest#getState} does. */
+	private int questRowStatus(int row) {
+		client.runScript(ScriptID.QUEST_STATUS_GET, row);
+		return statusFromScript(client.getIntStack()[0]);
+	}
+
+	/**
+	 * Maps the raw {@code QUEST_STATUS_GET} result to the WikiSync status code, mirroring
+	 * {@link Quest#getState}: 2 is finished, 1 is not started, anything else in progress.
+	 */
+	static int statusFromScript(int raw) {
+		if (raw == 2) {
+			return 2;
+		}
+		return raw == 1 ? 0 : 1;
 	}
 
 	/** Maps a RuneLite {@link QuestState} to the WikiSync status code (0/1/2). */
