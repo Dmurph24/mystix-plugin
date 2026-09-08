@@ -49,7 +49,6 @@ public class GoalProgressTracker implements GoalProgressState.SyncHooks {
 	/** Farming completions are time-based, so re-check every few ticks. */
 	private static final int FARMING_CHECK_TICKS = 8;
 
-	private GameState previousGameState = GameState.UNKNOWN;
 
 	@Inject
 	public GoalProgressTracker(
@@ -139,11 +138,21 @@ public class GoalProgressTracker implements GoalProgressState.SyncHooks {
 
 	@Subscribe
 	public void onGameStateChanged(GameStateChanged event) {
-		GameState newState = event.getGameState();
-		if (previousGameState == GameState.LOGGED_IN && newState != GameState.LOGGED_IN) {
+		if (endsSession(event.getGameState())) {
 			state.resetSession();
 		}
-		previousGameState = newState;
+	}
+
+	/**
+	 * Only a real logout ends the local session. Region loads, world hops and
+	 * brief connection drops pass through LOADING / HOPPING / CONNECTION_LOST on
+	 * the way back to LOGGED_IN with the player's XP, inventory and kills intact,
+	 * so treating them as a logout would wipe progress made since the last
+	 * server read (a goal completed seconds before a teleport, for example).
+	 */
+	static boolean endsSession(GameState newState) {
+		return newState == GameState.LOGIN_SCREEN
+				|| newState == GameState.LOGIN_SCREEN_AUTHENTICATOR;
 	}
 
 	// ------------------------------------------------ monitor / manager feeds
@@ -217,7 +226,6 @@ public class GoalProgressTracker implements GoalProgressState.SyncHooks {
 	}
 
 	public void clear() {
-		previousGameState = GameState.UNKNOWN;
 		state.clearAll();
 	}
 
