@@ -144,6 +144,16 @@ public interface MystixConfig extends Config {
 		return true;
 	}
 
+	@ConfigItem(
+			keyName = "syncKingdom",
+			name = "Kingdom of Miscellania",
+			description = "Sync your Managing Miscellania approval rating, coffer and worker allocation to Mystix. Reads on login and updates when they change.",
+			section = SYNC_SECTION,
+			position = 11)
+	default boolean syncKingdom() {
+		return true;
+	}
+
 	// --- Plugin Features ---
 
 	@ConfigItem(
