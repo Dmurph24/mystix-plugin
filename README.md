@@ -1,6 +1,6 @@
 # Mystix
 
-A RuneLite plugin that syncs your game data (farming timers, bank, skills, loadouts, loot, collection log, quests, diaries, combat achievements, boss kill counts and slayer) to the Mystix app, and shows your current roadmap goal in game.
+A RuneLite plugin that syncs your game data (farming timers, bank, skills, loadouts, loot, collection log, quests, diaries, combat achievements, boss kill counts, slayer and your Kingdom of Miscellania) to the Mystix app, and shows your current roadmap goal in game.
 
 ## Settings
 
