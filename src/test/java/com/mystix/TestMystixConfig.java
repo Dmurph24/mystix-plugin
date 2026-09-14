@@ -14,6 +14,7 @@ public class TestMystixConfig implements MystixConfig {
 	private boolean syncKillCounts = true;
 	private boolean syncSlayer = true;
 	private boolean syncHouseLocation = true;
+	private boolean syncKingdom = true;
 	private boolean showNextGoal = true;
 	private boolean showGoalProgress = true;
 	private boolean showGoalPopup = true;
@@ -116,6 +117,15 @@ public class TestMystixConfig implements MystixConfig {
 
 	public void setSyncHouseLocation(boolean syncHouseLocation) {
 		this.syncHouseLocation = syncHouseLocation;
+	}
+
+	@Override
+	public boolean syncKingdom() {
+		return syncKingdom;
+	}
+
+	public void setSyncKingdom(boolean syncKingdom) {
+		this.syncKingdom = syncKingdom;
 	}
 
 	@Override
