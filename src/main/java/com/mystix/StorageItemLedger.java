@@ -5,6 +5,7 @@ import java.util.LinkedHashMap;
 import java.util.Locale;
 import java.util.Map;
 import java.util.function.IntFunction;
+import java.util.function.Supplier;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import lombok.extern.slf4j.Slf4j;
@@ -31,11 +32,16 @@ final class StorageItemLedger {
 	final StorageItemSpec spec;
 	/** Resolves an item id to its in-game name; supplied by the monitor (client thread). */
 	private final IntFunction<String> itemName;
+	/** What the server last knew this container held (goal items only); applied before the first signal of a session. */
+	private final Supplier<Map<Integer, Integer>> seed;
 
 	private final Map<Integer, Integer> contents = new LinkedHashMap<>();
 	private Map<String, Integer> chatNameIndex;
 	private boolean full;
 	private boolean changed;
+	/** True once a real signal (gather, fill, empty, check) has been seen this session. */
+	private boolean known;
+	private boolean seeded;
 
 	// Per-tick observations.
 	private final Map<Integer, Integer> gatheredThisTick = new HashMap<>();
@@ -48,8 +54,46 @@ final class StorageItemLedger {
 	private boolean checkedEmpty;
 
 	StorageItemLedger(StorageItemSpec spec, IntFunction<String> itemName) {
+		this(spec, itemName, Map::of);
+	}
+
+	StorageItemLedger(StorageItemSpec spec, IntFunction<String> itemName, Supplier<Map<Integer, Integer>> seed) {
 		this.spec = spec;
 		this.itemName = itemName;
+		this.seed = seed == null ? Map::of : seed;
+	}
+
+	/**
+	 * Contents are unknown at login. Rather than start from zero (which would
+	 * overwrite the server's figure with nothing and lose whatever was already
+	 * inside), the first signal of the session builds on what the server last
+	 * saw for the goal items. Cleared by {@link #resetSession()}.
+	 */
+	private void ensureSeeded() {
+		if (seeded) {
+			return;
+		}
+		seeded = true;
+		Map<Integer, Integer> server = seed.get();
+		if (server != null) {
+			server.forEach((id, qty) -> {
+				if (spec.acceptedIds.contains(id) && qty != null && qty > 0) {
+					contents.put(id, qty);
+				}
+			});
+		}
+	}
+
+	/** Logout: the next session seeds again. */
+	void resetSession() {
+		seeded = false;
+		known = false;
+		full = false;
+	}
+
+	/** True once this session has observed the container (before that nothing is pushed or uploaded). */
+	boolean isKnown() {
+		return known;
 	}
 
 	// ----------------------------------------------------------- inputs
@@ -59,6 +103,7 @@ final class StorageItemLedger {
 		if (message == null) {
 			return;
 		}
+		ensureSeeded();
 		if (spec.extraGatherMessages.contains(message)) {
 			if (lastGatheredItem > 0 && !gatheredThisTick.isEmpty()) {
 				gatheredThisTick.merge(lastGatheredItem, 1, Integer::sum);
@@ -84,6 +129,7 @@ final class StorageItemLedger {
 		if (message == null) {
 			return false;
 		}
+		ensureSeeded();
 		String text = clean(message);
 		if (spec.emptiedMessages.contains(text) || spec.checkEmptyMessages.contains(text)) {
 			clear();
@@ -97,6 +143,7 @@ final class StorageItemLedger {
 		}
 		if (spec.fullMessages.contains(text)) {
 			full = true;
+			known = true;
 			return true;
 		}
 		return onCheckText(text);
@@ -111,9 +158,11 @@ final class StorageItemLedger {
 		if (text == null) {
 			return false;
 		}
+		ensureSeeded();
 		text = clean(text);
 		if (spec.checkEmptyMessages.contains(text)) {
 			checkedEmpty = true;
+			known = true;
 			return true;
 		}
 		Map<Integer, Integer> parsed = parseListing(text);
@@ -124,11 +173,13 @@ final class StorageItemLedger {
 			checkListing = new LinkedHashMap<>();
 		}
 		parsed.forEach((id, qty) -> checkListing.merge(id, qty, Integer::sum));
+		known = true;
 		return true;
 	}
 
 	/** The inventory changed: {@code added} / {@code removed} are per-item deltas of accepted items only. */
 	void onInventoryDiff(Map<Integer, Integer> added, Map<Integer, Integer> removed, boolean recentFill, boolean recentEmpty) {
+		ensureSeeded();
 		inventoryChangedThisTick = true;
 		added.forEach((id, qty) -> inventoryGainThisTick.merge(id, qty, Integer::sum));
 		if (recentFill && !removed.isEmpty()) {
@@ -145,6 +196,7 @@ final class StorageItemLedger {
 
 	/** An XP drop in a skill this container cares about. */
 	void onXp(net.runelite.api.Skill skill, int xpGained) {
+		ensureSeeded();
 		if (skill == spec.consumeSkill) {
 			consumedThisTick++;
 		}
@@ -243,6 +295,7 @@ final class StorageItemLedger {
 		}
 		contents.clear();
 		full = false;
+		known = true;
 	}
 
 	private void add(int itemId, int delta) {
@@ -267,6 +320,7 @@ final class StorageItemLedger {
 			contents.put(itemId, next);
 		}
 		changed = true;
+		known = true;
 	}
 
 	// ---------------------------------------------------------- parsing

@@ -696,6 +696,21 @@ final class GoalProgressState {
 		return ids;
 	}
 
+	/** What the server last held in {@code source} for each in-progress owned goal's item. */
+	synchronized Map<Integer, Integer> serverHeldFor(String source) {
+		Map<Integer, Integer> held = new HashMap<>();
+		for (LocalGoal lg : goals.values()) {
+			if (lg.type != GoalType.ITEM_OWNED || lg.isComplete() || lg.itemId == null || lg.serverHeldBySource == null) {
+				continue;
+			}
+			Integer qty = lg.serverHeldBySource.get(source);
+			if (qty != null && qty > 0) {
+				held.put(lg.itemId, qty);
+			}
+		}
+		return held;
+	}
+
 	/** The tracked roadmap with this collection id, or null. */
 	synchronized Roadmap getRoadmap(int collectionId) {
 		return roadmaps.get(collectionId);

@@ -255,6 +255,11 @@ public class GoalProgressTracker implements GoalProgressState.SyncHooks {
 		state.clearAll();
 	}
 
+	/** What the server last held in a bank-memory source for each in-progress owned goal's item. */
+	public Map<Integer, Integer> serverHeldFor(String source) {
+		return state.serverHeldFor(source);
+	}
+
 	/** Item ids of owned-item goals still in progress: the sources holding them upload on the short debounce. */
 	public Set<Integer> ownedGoalItemIds() {
 		return state.ownedGoalItemIds();
