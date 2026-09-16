@@ -45,6 +45,8 @@ public class GoalProgressTracker implements GoalProgressState.SyncHooks {
 	private final RoadmapManager roadmapManager;
 	private final GoalCompletionNotifier completionNotifier;
 	private final GoalProgressState state;
+	/** Storage-item monitors (rune pouch, barrels...) to flush on a local completion; set by the plugin. */
+	private volatile Runnable storageSyncNow;
 
 	/** Farming completions are time-based, so re-check every few ticks. */
 	private static final int FARMING_CHECK_TICKS = 8;
@@ -69,6 +71,10 @@ public class GoalProgressTracker implements GoalProgressState.SyncHooks {
 		this.roadmapManager = roadmapManager;
 		this.completionNotifier = completionNotifier;
 		this.state = new GoalProgressState(this);
+	}
+
+	public void setStorageSyncNow(Runnable storageSyncNow) {
+		this.storageSyncNow = storageSyncNow;
 	}
 
 	// ---------------------------------------------------------- game events
@@ -294,6 +300,10 @@ public class GoalProgressTracker implements GoalProgressState.SyncHooks {
 		// Inventory and gear (plus the bank when it was opened this session) so
 		// the server can confirm without waiting for a bank visit.
 		bankMemoryMonitor.syncInventoryNow();
+		Runnable storage = storageSyncNow;
+		if (storage != null) {
+			storage.run();
+		}
 	}
 
 	@Override
