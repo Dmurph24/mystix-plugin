@@ -255,6 +255,11 @@ public class GoalProgressTracker implements GoalProgressState.SyncHooks {
 		state.clearAll();
 	}
 
+	/** Item ids of owned-item goals still in progress: the sources holding them upload on the short debounce. */
+	public Set<Integer> ownedGoalItemIds() {
+		return state.ownedGoalItemIds();
+	}
+
 	// ----------------------------------------------------------------- reads
 
 	public GoalProgressView progressFor(RoadmapGoal goal) {

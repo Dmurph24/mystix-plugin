@@ -11,6 +11,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.function.BiConsumer;
+import java.util.function.Supplier;
 import javax.inject.Inject;
 import javax.inject.Singleton;
 import lombok.extern.slf4j.Slf4j;
@@ -133,6 +134,13 @@ public class StorageItemMonitor {
 	/** Receives every ledger change (source, item id to quantity), before any sync gate. */
 	public void setSnapshotListener(BiConsumer<String, Map<Integer, Integer>> listener) {
 		this.snapshotListener = listener;
+	}
+
+	/** Item ids active owned-item goals are counting (short debounce for them); set by the plugin. */
+	public void setGoalItems(Supplier<Set<Integer>> goalItems) {
+		for (Tracked t : tracked) {
+			t.syncer.setGoalItems(goalItems);
+		}
 	}
 
 	public void stop() {

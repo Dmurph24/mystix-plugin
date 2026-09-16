@@ -4,6 +4,8 @@ import com.google.gson.Gson;
 import com.mystix.api.MystixApiClient;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.Set;
+import java.util.function.Supplier;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.function.BiConsumer;
 import java.util.function.IntUnaryOperator;
@@ -65,6 +67,11 @@ public class RunePouchMonitor {
 	/** Receives every read (source, item id to quantity), before any sync gate. */
 	public void setSnapshotListener(BiConsumer<String, Map<Integer, Integer>> listener) {
 		this.snapshotListener = listener;
+	}
+
+	/** Item ids active owned-item goals are counting (short debounce for them); set by the plugin. */
+	public void setGoalItems(Supplier<Set<Integer>> goalItems) {
+		syncer.setGoalItems(goalItems);
 	}
 
 	public void stop() {

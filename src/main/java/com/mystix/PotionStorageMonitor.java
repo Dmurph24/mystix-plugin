@@ -10,6 +10,8 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.function.Supplier;
 import javax.inject.Inject;
 import javax.inject.Singleton;
 import lombok.extern.slf4j.Slf4j;
@@ -17,7 +19,9 @@ import net.runelite.api.Client;
 import net.runelite.api.EnumComposition;
 import net.runelite.api.EnumID;
 import net.runelite.api.ScriptID;
+import net.runelite.api.GameState;
 import net.runelite.api.events.ClientTick;
+import net.runelite.api.events.GameStateChanged;
 import net.runelite.api.events.VarbitChanged;
 import net.runelite.api.events.WidgetClosed;
 import net.runelite.api.events.WidgetLoaded;
@@ -40,29 +44,45 @@ public class PotionStorageMonitor {
 
 	private final Client client;
 	private final MystixConfig config;
-	private final MystixApiClient apiClient;
-	private final Gson gson;
+	private final SourceSyncer syncer;
 
 	private Set<Integer> potionStoreVarps;
 	private boolean needsRebuild;
-	private String lastSyncJson;
+	private GameState previousGameState = GameState.UNKNOWN;
 
 	@Inject
 	public PotionStorageMonitor(
 			Client client,
 			MystixConfig config,
 			MystixApiClient apiClient,
-			Gson gson) {
+			Gson gson,
+			ScheduledExecutorService executor) {
 		this.client = client;
 		this.config = config;
-		this.apiClient = apiClient;
-		this.gson = gson;
+		this.syncer = new SourceSyncer(SOURCE, gson, executor,
+				() -> config.syncBankMemory() && SyncGuard.hasAppKey(config) && !GameModeUtil.isSpecialGameMode(client),
+				() -> SyncGuard.getPlayerUsername(client),
+				apiClient::sendBankSync);
+	}
+
+	/** Item ids active owned-item goals are counting (short debounce for them); set by the plugin. */
+	public void setGoalItems(Supplier<Set<Integer>> goalItems) {
+		syncer.setGoalItems(goalItems);
 	}
 
 	public void stop() {
+		syncer.stop();
 		potionStoreVarps = null;
 		needsRebuild = false;
-		lastSyncJson = null;
+	}
+
+	@Subscribe
+	public void onGameStateChanged(GameStateChanged event) {
+		GameState newState = event.getGameState();
+		if (previousGameState == GameState.LOGGED_IN && newState != GameState.LOGGED_IN) {
+			syncer.flushPending();
+		}
+		previousGameState = newState;
 	}
 
 	@Subscribe
@@ -119,27 +139,11 @@ public class PotionStorageMonitor {
 			Arrays.stream(triggers).forEach(potionStoreVarps::add);
 		}
 
-		String playerUsername = SyncGuard.getPlayerUsername(client);
-		if (playerUsername == null) {
-			return;
+		Map<Integer, Integer> quantities = new LinkedHashMap<>();
+		for (BankSyncPayload.BankItem item : collectPotionItems()) {
+			quantities.merge(item.getItemId(), item.getQuantity(), Integer::sum);
 		}
-
-		List<BankSyncPayload.BankItem> items = collectPotionItems();
-
-		Map<String, List<BankSyncPayload.BankItem>> itemsBySource = new LinkedHashMap<>();
-		itemsBySource.put(SOURCE, items);
-
-		BankSyncPayload payload = new BankSyncPayload(playerUsername, itemsBySource);
-		String json = payload.toJson(gson);
-
-		if (json.equals(lastSyncJson)) {
-			log.debug("Potion storage unchanged, skipping sync");
-			return;
-		}
-
-		lastSyncJson = json;
-		log.debug("Syncing {} potion storage items for player: {}", items.size(), playerUsername);
-		apiClient.sendBankSync(payload);
+		syncer.submit(quantities, false);
 	}
 
 	/**

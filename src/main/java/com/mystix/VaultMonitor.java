@@ -2,18 +2,21 @@ package com.mystix;
 
 import com.google.gson.Gson;
 import com.mystix.api.MystixApiClient;
-import com.mystix.model.BankSyncPayload;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
-import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.ScheduledExecutorService;
 import java.util.function.BiConsumer;
+import java.util.function.Supplier;
 import javax.inject.Inject;
 import javax.inject.Singleton;
 import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.Client;
+import net.runelite.api.GameState;
 import net.runelite.api.ItemContainer;
+import net.runelite.api.events.GameStateChanged;
 import net.runelite.api.events.ItemContainerChanged;
 import net.runelite.api.gameval.InventoryID;
 import net.runelite.client.eventbus.Subscribe;
@@ -57,12 +60,9 @@ public class VaultMonitor {
 	}
 
 	private final Client client;
-	private final MystixConfig config;
-	private final MystixApiClient apiClient;
 	private final ItemManager itemManager;
-	private final Gson gson;
-
-	private final Map<String, String> lastSyncJsonBySource = new LinkedHashMap<>();
+	private final SourceSyncer syncer;
+	private GameState previousGameState = GameState.UNKNOWN;
 
 	/** Receives every container read (source, canonical item id to quantity),
 	 * before any sync gate, so goal progress moves even with sync disabled. */
@@ -78,16 +78,32 @@ public class VaultMonitor {
 			MystixConfig config,
 			MystixApiClient apiClient,
 			ItemManager itemManager,
-			Gson gson) {
+			Gson gson,
+			ScheduledExecutorService executor) {
 		this.client = client;
-		this.config = config;
-		this.apiClient = apiClient;
 		this.itemManager = itemManager;
-		this.gson = gson;
+		this.syncer = new SourceSyncer("vaults", gson, executor,
+				() -> config.syncBankMemory() && SyncGuard.hasAppKey(config) && !GameModeUtil.isSpecialGameMode(client),
+				() -> SyncGuard.getPlayerUsername(client),
+				apiClient::sendBankSync);
+	}
+
+	/** Item ids active owned-item goals are counting (short debounce for them); set by the plugin. */
+	public void setGoalItems(Supplier<Set<Integer>> goalItems) {
+		syncer.setGoalItems(goalItems);
 	}
 
 	public void stop() {
-		lastSyncJsonBySource.clear();
+		syncer.stop();
+	}
+
+	@Subscribe
+	public void onGameStateChanged(GameStateChanged event) {
+		GameState newState = event.getGameState();
+		if (previousGameState == GameState.LOGGED_IN && newState != GameState.LOGGED_IN) {
+			syncer.flushPending();
+		}
+		previousGameState = newState;
 	}
 
 	@Subscribe
@@ -110,39 +126,8 @@ public class VaultMonitor {
 			listener.accept(source, itemQuantities);
 		}
 
-		if (!config.syncBankMemory()) {
-			return;
-		}
-		if (!SyncGuard.hasAppKey(config)) {
-			log.debug("Vault sync skipped: no App Key configured");
-			return;
-		}
-		if (GameModeUtil.isSpecialGameMode(client)) {
-			log.debug("Vault sync skipped: special game mode detected");
-			return;
-		}
-
-		String playerUsername = SyncGuard.getPlayerUsername(client);
-		if (playerUsername == null) {
-			log.warn("Vault sync skipped: could not get player username");
-			return;
-		}
-
-		List<BankSyncPayload.BankItem> items = ItemCollector.toBankItemList(itemQuantities);
-
-		Map<String, List<BankSyncPayload.BankItem>> itemsBySource = new LinkedHashMap<>();
-		itemsBySource.put(source, items);
-
-		BankSyncPayload payload = new BankSyncPayload(playerUsername, itemsBySource);
-		String json = payload.toJson(gson);
-
-		if (json.equals(lastSyncJsonBySource.get(source))) {
-			log.debug("{} contents unchanged, skipping sync", source);
-			return;
-		}
-
-		lastSyncJsonBySource.put(source, json);
-		log.debug("Syncing {} {} items for player: {}", items.size(), source, playerUsername);
-		apiClient.sendBankSync(payload);
+		Map<String, Map<Integer, Integer>> bySource = new LinkedHashMap<>();
+		bySource.put(source, itemQuantities);
+		syncer.submitSources(bySource, false);
 	}
 }

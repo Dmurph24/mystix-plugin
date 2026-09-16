@@ -685,6 +685,17 @@ final class GoalProgressState {
 		completionNotified.retainAll(goals.keySet());
 	}
 
+	/** Item ids of owned-item goals still in progress (any roadmap). */
+	synchronized Set<Integer> ownedGoalItemIds() {
+		Set<Integer> ids = new HashSet<>();
+		for (LocalGoal lg : goals.values()) {
+			if (lg.type == GoalType.ITEM_OWNED && !lg.isComplete() && lg.itemId != null) {
+				ids.add(lg.itemId);
+			}
+		}
+		return ids;
+	}
+
 	/** The tracked roadmap with this collection id, or null. */
 	synchronized Roadmap getRoadmap(int collectionId) {
 		return roadmaps.get(collectionId);

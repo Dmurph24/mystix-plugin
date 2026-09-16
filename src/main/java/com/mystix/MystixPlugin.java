@@ -215,6 +215,12 @@ public class MystixPlugin extends Plugin {
 		bankMemoryMonitor.setSyncedListener(goalProgressTracker::onSourceSynced);
 		bankMemoryMonitor.setPayloadListener(goalProgressTracker::onBankPayload);
 		vaultMonitor.setSnapshotListener(goalProgressTracker::onContainerSnapshot);
+		bankMemoryMonitor.setGoalItems(goalProgressTracker::ownedGoalItemIds);
+		vaultMonitor.setGoalItems(goalProgressTracker::ownedGoalItemIds);
+		potionStorageMonitor.setGoalItems(goalProgressTracker::ownedGoalItemIds);
+		runePouchMonitor.setGoalItems(goalProgressTracker::ownedGoalItemIds);
+		plankSackMonitor.setGoalItems(goalProgressTracker::ownedGoalItemIds);
+		storageItemMonitor.setGoalItems(goalProgressTracker::ownedGoalItemIds);
 		runePouchMonitor.setSnapshotListener(goalProgressTracker::onContainerSnapshot);
 		plankSackMonitor.setSnapshotListener(goalProgressTracker::onContainerSnapshot);
 		storageItemMonitor.setSnapshotListener(goalProgressTracker::onContainerSnapshot);
@@ -287,6 +293,12 @@ public class MystixPlugin extends Plugin {
 		bankMemoryMonitor.setSyncedListener(null);
 		bankMemoryMonitor.setPayloadListener(null);
 		vaultMonitor.setSnapshotListener(null);
+		bankMemoryMonitor.setGoalItems(null);
+		vaultMonitor.setGoalItems(null);
+		potionStorageMonitor.setGoalItems(null);
+		runePouchMonitor.setGoalItems(null);
+		plankSackMonitor.setGoalItems(null);
+		storageItemMonitor.setGoalItems(null);
 		runePouchMonitor.setSnapshotListener(null);
 		plankSackMonitor.setSnapshotListener(null);
 		storageItemMonitor.setSnapshotListener(null);
