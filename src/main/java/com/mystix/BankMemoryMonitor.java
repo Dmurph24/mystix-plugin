@@ -9,6 +9,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.function.Consumer;
+import java.util.function.Function;
 import java.util.function.Supplier;
 import javax.inject.Inject;
 import javax.inject.Singleton;
@@ -18,6 +19,10 @@ import net.runelite.api.GameState;
 import net.runelite.api.ItemContainer;
 import net.runelite.api.events.GameStateChanged;
 import net.runelite.api.events.ItemContainerChanged;
+import net.runelite.api.events.MenuOptionClicked;
+import net.runelite.api.events.WidgetClosed;
+import net.runelite.api.events.WidgetLoaded;
+import net.runelite.api.gameval.InterfaceID;
 import net.runelite.api.gameval.InventoryID;
 import net.runelite.client.callback.ClientThread;
 import net.runelite.client.eventbus.Subscribe;
@@ -42,8 +47,14 @@ public class BankMemoryMonitor {
 	private final ClientThread clientThread;
 	private final ItemManager itemManager;
 	private final SourceSyncer syncer;
+	/** Deposits made where the bank container is never sent (deposit box, bank boat). */
+	private final BankDepositLedger deposits;
+	/** Source to what the server last held for the goal items in it; set by the plugin. */
+	private volatile Function<String, Map<Integer, Integer>> seedSupplier;
 
 	private GameState previousGameState = GameState.UNKNOWN;
+	/** Inventory + gear as last read, for deposit diffs. */
+	private Map<Integer, Integer> lastCarried = new LinkedHashMap<>();
 
 	@Inject
 	public BankMemoryMonitor(
@@ -61,6 +72,38 @@ public class BankMemoryMonitor {
 				() -> config.syncBankMemory() && SyncGuard.hasAppKey(config) && !GameModeUtil.isSpecialGameMode(client),
 				() -> SyncGuard.getPlayerUsername(client),
 				apiClient::sendBankSync);
+		this.deposits = new BankDepositLedger(() -> {
+			Function<String, Map<Integer, Integer>> s = seedSupplier;
+			return s == null ? Map.of() : s.apply(BankDepositLedger.SOURCE);
+		});
+	}
+
+	public void setSeedSupplier(Function<String, Map<Integer, Integer>> supplier) {
+		this.seedSupplier = supplier;
+	}
+
+	/** Deposit boxes (and the bank boat) open this interface instead of the bank. */
+	@Subscribe
+	public void onWidgetLoaded(WidgetLoaded event) {
+		if (event.getGroupId() == InterfaceID.BANK_DEPOSITBOX) {
+			deposits.onDepositInterface(true);
+		}
+	}
+
+	@Subscribe
+	public void onWidgetClosed(WidgetClosed event) {
+		if (event.getGroupId() == InterfaceID.BANK_DEPOSITBOX) {
+			deposits.onDepositInterface(false);
+		}
+	}
+
+	/** Any "Deposit…" option (Deposit-All, Deposit inventory, Deposit worn items) marks the next inventory change as a deposit. */
+	@Subscribe
+	public void onMenuOptionClicked(MenuOptionClicked event) {
+		String option = event.getMenuOption();
+		if (option != null && option.startsWith("Deposit")) {
+			deposits.onDepositClick(client.getTickCount());
+		}
 	}
 
 	/** Item ids active owned-item goals are counting (short debounce for them); set by the plugin. */
@@ -111,6 +154,8 @@ public class BankMemoryMonitor {
 			// captured while logged in. Do not re-read the client here: the
 			// player name is already gone and the containers may read empty.
 			syncer.flushPending();
+			deposits.resetSession();
+			lastCarried = new LinkedHashMap<>();
 		}
 		previousGameState = newState;
 	}
@@ -143,8 +188,36 @@ public class BankMemoryMonitor {
 		if (bySource == null) {
 			return;
 		}
+		trackDeposits(bySource);
 		notifyPayload(bySource);
 		syncer.submitSources(bySource, immediate);
+	}
+
+	/**
+	 * Items that left the inventory or gear in a deposit context are banked
+	 * even though no bank container was sent. Once the bank proper is read it
+	 * holds everything, so the deposits go back to empty alongside it.
+	 */
+	private void trackDeposits(Map<String, Map<Integer, Integer>> bySource) {
+		Map<Integer, Integer> carried = bySource.get(SOURCE_INVENTORY);
+		Map<Integer, Integer> removed = new LinkedHashMap<>();
+		for (Map.Entry<Integer, Integer> e : lastCarried.entrySet()) {
+			int delta = e.getValue() - carried.getOrDefault(e.getKey(), 0);
+			if (delta > 0) {
+				removed.put(e.getKey(), delta);
+			}
+		}
+		lastCarried = new LinkedHashMap<>(carried);
+		boolean changed = false;
+		if (bySource.containsKey(SOURCE_BANK)) {
+			changed = deposits.onBankRead();
+			bySource.put(BankDepositLedger.SOURCE, deposits.contents());
+		} else if (deposits.onItemsRemoved(removed, client.getTickCount())) {
+			changed = true;
+		}
+		if (changed || (!deposits.contents().isEmpty() && !bySource.containsKey(BankDepositLedger.SOURCE))) {
+			bySource.put(BankDepositLedger.SOURCE, deposits.contents());
+		}
 	}
 
 	private Map<String, Map<Integer, Integer>> readSources(boolean inventoryOnlyOk) {
