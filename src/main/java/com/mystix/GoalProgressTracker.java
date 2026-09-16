@@ -88,6 +88,18 @@ public class GoalProgressTracker implements GoalProgressState.SyncHooks {
 	 * visits: cutting or picking up raises them, dropping lowers them. */
 	@Subscribe
 	public void onItemContainerChanged(ItemContainerChanged event) {
+		if (log.isDebugEnabled()) {
+			ItemContainer c = event.getItemContainer();
+			int filled = 0;
+			if (c != null) {
+				for (Item item : c.getItems()) {
+					if (item != null && item.getId() > 0 && item.getQuantity() > 0) {
+						filled++;
+					}
+				}
+			}
+			log.debug("Container changed: id={} filledSlots={}", event.getContainerId(), filled);
+		}
 		boolean equipment;
 		if (event.getContainerId() == InventoryID.INV) {
 			equipment = false;

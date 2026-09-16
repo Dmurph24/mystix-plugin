@@ -54,9 +54,19 @@ public class VaultMonitor {
 		VAULT_SOURCES = Collections.unmodifiableMap(m);
 	}
 
+	/** Set on container ids the client reports for interface-owned inventories (a boat's hold arrives as 965 | 0x8000). */
+	static final int REMOTE_CONTAINER_FLAG = 0x8000;
+
 	/** The bank-sync source for a container id, or null when not tracked. */
 	static String sourceFor(int containerId) {
-		return VAULT_SOURCES.get(containerId);
+		String source = VAULT_SOURCES.get(containerId);
+		if (source == null && (containerId & REMOTE_CONTAINER_FLAG) != 0) {
+			int base = containerId & ~REMOTE_CONTAINER_FLAG;
+			if (base >= InventoryID.SAILING_BOAT_1_CARGOHOLD && base <= InventoryID.SAILING_TRAWLING_NET) {
+				source = VAULT_SOURCES.get(base);
+			}
+		}
+		return source;
 	}
 
 	private final Client client;
@@ -108,7 +118,7 @@ public class VaultMonitor {
 
 	@Subscribe
 	public void onItemContainerChanged(ItemContainerChanged event) {
-		String source = VAULT_SOURCES.get(event.getContainerId());
+		String source = sourceFor(event.getContainerId());
 		if (source == null) {
 			return;
 		}

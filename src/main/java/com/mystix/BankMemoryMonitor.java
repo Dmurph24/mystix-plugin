@@ -19,7 +19,6 @@ import net.runelite.api.GameState;
 import net.runelite.api.ItemContainer;
 import net.runelite.api.events.GameStateChanged;
 import net.runelite.api.events.ItemContainerChanged;
-import net.runelite.api.events.MenuOptionClicked;
 import net.runelite.api.events.WidgetClosed;
 import net.runelite.api.events.WidgetLoaded;
 import net.runelite.api.gameval.InterfaceID;
@@ -103,14 +102,6 @@ public class BankMemoryMonitor {
 		}
 	}
 
-	/** Any "Deposit…" option (Deposit-All, Deposit inventory, Deposit worn items) marks the next inventory change as a deposit. */
-	@Subscribe
-	public void onMenuOptionClicked(MenuOptionClicked event) {
-		String option = event.getMenuOption();
-		if (option != null && option.startsWith("Deposit")) {
-			deposits.onDepositClick(client.getTickCount());
-		}
-	}
 
 	/** Item ids active owned-item goals are counting (short debounce for them); set by the plugin. */
 	public void setGoalItems(Supplier<Set<Integer>> goalItems) {

@@ -438,6 +438,10 @@ final class GoalProgressState {
 			if (lg.type != GoalType.ITEM_OWNED || lg.isComplete() || lg.itemId == null) {
 				continue;
 			}
+			if (log.isDebugEnabled()) {
+				log.debug("Owned goal {} item {}: held={} start={} target={} {}", lg.goal.getId(), lg.itemId,
+						heldNow(lg), lg.startQty, lg.serverTarget, holdingsBreakdown(lg));
+			}
 			if (ownedReached(lg)) {
 				lg.locallyComplete = true;
 				completed.add(lg.goal);
@@ -486,6 +490,26 @@ final class GoalProgressState {
 			}
 		}
 		return held + liveInventory.getOrDefault(itemId, 0) + liveEquipment.getOrDefault(itemId, 0);
+	}
+
+	/** Debug: where the goal item currently sits, per source, and whether the figure is local or the server's. */
+	private String holdingsBreakdown(LocalGoal lg) {
+		StringBuilder sb = new StringBuilder("[");
+		Set<String> sources = new HashSet<>(localBySource.keySet());
+		if (lg.serverHeldBySource != null) {
+			sources.addAll(lg.serverHeldBySource.keySet());
+		}
+		for (String source : sources) {
+			Map<Integer, Integer> local = localBySource.get(source);
+			int qty = local != null ? local.getOrDefault(lg.itemId, 0)
+					: lg.serverHeldBySource == null ? 0 : lg.serverHeldBySource.getOrDefault(source, 0);
+			if (qty != 0 || local != null) {
+				sb.append(source).append('=').append(qty).append(local != null ? "(local) " : "(server) ");
+			}
+		}
+		sb.append("inv=").append(liveInventory.getOrDefault(lg.itemId, 0));
+		sb.append(" worn=").append(liveEquipment.getOrDefault(lg.itemId, 0)).append(']');
+		return sb.toString();
 	}
 
 	private boolean ownedReached(LocalGoal lg) {

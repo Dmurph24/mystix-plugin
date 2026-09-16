@@ -5,9 +5,9 @@ import java.util.Map;
 import java.util.function.Supplier;
 
 /**
- * Items the player deposited through a deposit box, the Sailing bank boat
- * or any other "Deposit" interface that does not send the bank container to
- * the client. Without this the deposited items simply vanish from the
+ * Items the player deposited through a deposit box (interface open), which
+ * does not send the bank container to the client, or moved into the bank
+ * by other means the client is not shown (a crew member banking the hold). Without this the deposited items simply vanish from the
  * plugin's holdings until the next real bank visit. Kept as bank-memory
  * source {@code bank_deposits}, seeded from the server's figure on the
  * first deposit of a session, and cleared when the bank proper is read
