@@ -130,10 +130,12 @@ final class GoalProgressState {
 		/** Combat achievement goals: the in-game task id. */
 		Integer taskId;
 		/** Owned-item goals: holdings when the goal was created (gain baseline),
-		 * and the banked parts as the server last saw them. */
+		 * and the banked parts as the server last saw them: per source when the
+		 * server sends the breakdown, else the legacy bank + vaults pair. */
 		Integer startQty;
 		Integer serverHeldBank;
 		int serverHeldVaults;
+		Map<String, Integer> serverHeldBySource;
 		/** Farming goals: when the goal was created (crops planted after count), and its matchers. */
 		Instant createdAt;
 		Integer farmItemId;
@@ -165,14 +167,24 @@ final class GoalProgressState {
 	private final Map<String, Integer> liveXp = new HashMap<>();
 	private final Map<String, Integer> uploadedXp = new HashMap<>();
 	private final Map<Integer, LocalGoal> goals = new HashMap<>();
+	/** Bank-sync source names this class treats specially. */
+	static final String SOURCE_BANK = "bank";
+	static final String SOURCE_INVENTORY = "inventory";
+
 	/** Live inventory and equipment quantities per canonical item id (from
-	 * container changes), and the bank proper from this session's last bank
-	 * upload. Owned-item goals add the server's banked parts to these. */
+	 * container changes), plus this session's snapshot of every other
+	 * container the client has read (bank, vaults, cargo holds, storage
+	 * items) keyed by bank-sync source. A local snapshot supersedes the
+	 * server's figure for that source for the rest of the session: the plugin
+	 * is the only writer of these sources while logged in, so it is never
+	 * staler than a roadmap read (which may predate a debounced upload). */
 	private final Map<Integer, Integer> liveInventory = new HashMap<>();
 	private final Map<Integer, Integer> liveEquipment = new HashMap<>();
-	private Map<Integer, Integer> localBank;
+	private final Map<String, Map<Integer, Integer>> localBySource = new HashMap<>();
 	/** True once the client has reported its inventory this session. */
 	private boolean inventorySeen;
+	/** Holdings changed since owned-item completions were last checked. */
+	private boolean ownedDirty;
 
 	/** Latest farming / bird house timers the plugin computed (any timer type). */
 	private List<TimerSyncItem> farmingTimers = Collections.emptyList();
@@ -371,7 +383,9 @@ final class GoalProgressState {
 	/**
 	 * The client's live inventory or equipment (canonical item id to quantity).
 	 * Owned-item goals move on every change: picking up or cutting items raises
-	 * them, dropping or alching lowers them.
+	 * them, dropping or alching lowers them. Completion is decided in
+	 * {@link #settleOwned()} so a transfer between containers that arrives as
+	 * two events in one tick cannot complete a goal in between.
 	 */
 	synchronized void onInventoryChanged(boolean equipment, Map<Integer, Integer> quantities) {
 		Map<Integer, Integer> target = equipment ? liveEquipment : liveInventory;
@@ -380,13 +394,41 @@ final class GoalProgressState {
 			target.putAll(quantities);
 		}
 		inventorySeen = true;
-		checkOwned();
+		ownedDirty = true;
 	}
 
 	/** This session's bank upload: the bank proper, which supersedes the
-	 * server's banked figure until the next server read catches up. */
+	 * server's banked figure for the rest of the session. */
 	synchronized void onBankSnapshot(Map<Integer, Integer> bankQuantities) {
-		localBank = bankQuantities == null ? new HashMap<>() : new HashMap<>(bankQuantities);
+		onContainerSnapshot(SOURCE_BANK, bankQuantities);
+	}
+
+	/**
+	 * The client read a container that syncs as its own bank-memory source
+	 * (bank, seed vault, looting bag, a boat's cargo hold, the fish barrel
+	 * ledger...). Its contents (canonical item id to quantity) replace the
+	 * server's figure for that source. Sources the server never reports
+	 * (client-only ledgers) simply add.
+	 */
+	synchronized void onContainerSnapshot(String source, Map<Integer, Integer> quantities) {
+		if (source == null || SOURCE_INVENTORY.equals(source)) {
+			return;
+		}
+		localBySource.put(source, quantities == null ? new HashMap<>() : new HashMap<>(quantities));
+		ownedDirty = true;
+	}
+
+	/**
+	 * Once per game tick: decide owned-item completions on the settled
+	 * holdings. Same-tick event pairs (barrel emptied into the bank: barrel
+	 * to 0 and bank +28 in unspecified order) would otherwise double count
+	 * for an instant, and a local completion is never unset.
+	 */
+	synchronized void settleOwned() {
+		if (!ownedDirty) {
+			return;
+		}
+		ownedDirty = false;
 		checkOwned();
 	}
 
@@ -407,17 +449,43 @@ final class GoalProgressState {
 		}
 	}
 
-	/** Held right now: banked parts (this session's bank snapshot when there is
-	 * one, else the server's) plus live inventory and equipment. Null until
-	 * the client has reported its inventory. */
+	/** Held right now: every container source (this session's snapshot when
+	 * there is one, else the server's figure) plus live inventory and
+	 * equipment. Null until the client has reported its inventory or when the
+	 * server sent no holdings at all. */
 	private Integer heldNow(LocalGoal lg) {
-		if (!inventorySeen || lg.itemId == null || lg.serverHeldBank == null) {
+		if (!inventorySeen || lg.itemId == null) {
 			return null;
 		}
-		int bank = localBank != null ? localBank.getOrDefault(lg.itemId, 0) : lg.serverHeldBank;
-		return bank + lg.serverHeldVaults
-				+ liveInventory.getOrDefault(lg.itemId, 0)
-				+ liveEquipment.getOrDefault(lg.itemId, 0);
+		int itemId = lg.itemId;
+		int held = 0;
+		if (lg.serverHeldBySource != null) {
+			Set<String> sources = new HashSet<>(lg.serverHeldBySource.keySet());
+			sources.addAll(localBySource.keySet());
+			for (String source : sources) {
+				if (SOURCE_INVENTORY.equals(source)) {
+					continue;
+				}
+				Map<Integer, Integer> local = localBySource.get(source);
+				held += local != null
+						? local.getOrDefault(itemId, 0)
+						: lg.serverHeldBySource.getOrDefault(source, 0);
+			}
+		} else {
+			// Older server: bank + one vault total. Local vault snapshots may
+			// overlap the vault total; the per-source path supersedes this.
+			if (lg.serverHeldBank == null) {
+				return null;
+			}
+			Map<Integer, Integer> localBank = localBySource.get(SOURCE_BANK);
+			held = (localBank != null ? localBank.getOrDefault(itemId, 0) : lg.serverHeldBank) + lg.serverHeldVaults;
+			for (Map.Entry<String, Map<Integer, Integer>> e : localBySource.entrySet()) {
+				if (!SOURCE_BANK.equals(e.getKey())) {
+					held += e.getValue().getOrDefault(itemId, 0);
+				}
+			}
+		}
+		return held + liveInventory.getOrDefault(itemId, 0) + liveEquipment.getOrDefault(itemId, 0);
 	}
 
 	private boolean ownedReached(LocalGoal lg) {
@@ -577,8 +645,7 @@ final class GoalProgressState {
 			lg.startQty = g.getStartQty();
 			lg.serverHeldBank = g.getHeldBank();
 			lg.serverHeldVaults = g.getHeldVaults() == null ? 0 : g.getHeldVaults();
-			// A fresh server read includes any bank upload made before it.
-			localBank = null;
+			lg.serverHeldBySource = g.getHeldBySource();
 			lg.farmItemId = lg.type == GoalType.FARMING_TIMER ? g.getOsrsItemId() : null;
 			lg.farmTimerType = g.getTimerType();
 			lg.farmEntity = g.getEntity();
@@ -632,8 +699,9 @@ final class GoalProgressState {
 		farmingTimers = Collections.emptyList();
 		liveInventory.clear();
 		liveEquipment.clear();
-		localBank = null;
+		localBySource.clear();
 		inventorySeen = false;
+		ownedDirty = false;
 		for (LocalGoal lg : goals.values()) {
 			lg.localDelta = 0;
 			lg.locallyComplete = false;
@@ -649,6 +717,8 @@ final class GoalProgressState {
 		completionNotified.clear();
 		liveXp.clear();
 		uploadedXp.clear();
+		localBySource.clear();
+		ownedDirty = false;
 		lastFastPathAtMs = Long.MIN_VALUE;
 	}
 

@@ -15,7 +15,7 @@ import javax.inject.Singleton;
 import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.Client;
 import net.runelite.api.GameState;
-import net.runelite.api.InventoryID;
+import net.runelite.api.gameval.InventoryID;
 import net.runelite.api.Item;
 import net.runelite.api.ItemComposition;
 import net.runelite.api.ItemContainer;
@@ -83,9 +83,9 @@ public class GoalProgressTracker implements GoalProgressState.SyncHooks {
 	@Subscribe
 	public void onItemContainerChanged(ItemContainerChanged event) {
 		boolean equipment;
-		if (event.getContainerId() == InventoryID.INVENTORY.getId()) {
+		if (event.getContainerId() == InventoryID.INV) {
 			equipment = false;
-		} else if (event.getContainerId() == InventoryID.EQUIPMENT.getId()) {
+		} else if (event.getContainerId() == InventoryID.WORN) {
 			equipment = true;
 		} else {
 			return;
@@ -120,6 +120,25 @@ public class GoalProgressTracker implements GoalProgressState.SyncHooks {
 		state.onBankSnapshot(quantities);
 	}
 
+	/**
+	 * A storage container that syncs as its own bank-memory source (seed vault,
+	 * looting bag, a boat's cargo hold, the fish barrel ledger...) was read:
+	 * its contents become this session's snapshot for that source, so moving
+	 * items into it no longer reads as a loss. Client thread.
+	 */
+	public void onContainerSnapshot(String source, Map<Integer, Integer> quantities) {
+		Map<Integer, Integer> canonical = new HashMap<>();
+		if (quantities != null) {
+			for (Map.Entry<Integer, Integer> e : quantities.entrySet()) {
+				if (e.getKey() == null || e.getValue() == null || e.getValue() <= 0) {
+					continue;
+				}
+				canonical.merge(canonicalItemId(e.getKey()), e.getValue(), Integer::sum);
+			}
+		}
+		state.onContainerSnapshot(source, canonical);
+	}
+
 	/** Noted items map to their unnoted item id (client thread). */
 	private int canonicalItemId(int itemId) {
 		ItemComposition composition = itemManager.getItemComposition(itemId);
@@ -131,6 +150,7 @@ public class GoalProgressTracker implements GoalProgressState.SyncHooks {
 
 	@Subscribe
 	public void onGameTick(GameTick event) {
+		state.settleOwned();
 		if (client.getTickCount() % FARMING_CHECK_TICKS == 0) {
 			state.checkFarming(System.currentTimeMillis());
 		}

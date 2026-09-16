@@ -202,6 +202,7 @@ public class MystixPlugin extends Plugin {
 		timerMonitor.setTimersListener(goalProgressTracker::onFarmingTimers);
 		bankMemoryMonitor.setSyncedListener(goalProgressTracker::onSourceSynced);
 		bankMemoryMonitor.setPayloadListener(goalProgressTracker::onBankPayload);
+		vaultMonitor.setSnapshotListener(goalProgressTracker::onContainerSnapshot);
 		roadmapManager.startPeriodicRefresh();
 
 		// Side-panel roadmap tab.
@@ -262,6 +263,7 @@ public class MystixPlugin extends Plugin {
 		timerMonitor.setTimersListener(null);
 		bankMemoryMonitor.setSyncedListener(null);
 		bankMemoryMonitor.setPayloadListener(null);
+		vaultMonitor.setSnapshotListener(null);
 		goalCompletionNotifier.clear();
 		goalProgressTracker.clear();
 		goalImageCache.clear();
