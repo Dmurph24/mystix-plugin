@@ -82,6 +82,12 @@ public class BankMemoryMonitor {
 		this.seedSupplier = supplier;
 	}
 
+	/** A storage item was emptied into a deposit box: count its contents as deposited and push. */
+	public void onContainerEmptiedToDepositBox(Map<Integer, Integer> contents) {
+		deposits.onContainerEmptied(contents);
+		clientThread.invokeLater(() -> push(true, false));
+	}
+
 	/** Deposit boxes (and the bank boat) open this interface instead of the bank. */
 	@Subscribe
 	public void onWidgetLoaded(WidgetLoaded event) {

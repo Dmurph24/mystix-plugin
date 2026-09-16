@@ -58,6 +58,19 @@ final class BankDepositLedger {
 		return true;
 	}
 
+	/** A storage item (barrel, sack...) was emptied into a deposit box: its contents are banked too. */
+	void onContainerEmptied(Map<Integer, Integer> contents) {
+		if (contents == null || contents.isEmpty()) {
+			return;
+		}
+		ensureSeeded();
+		contents.forEach((id, qty) -> {
+			if (id != null && qty != null && qty > 0) {
+				deposits.merge(id, qty, Integer::sum);
+			}
+		});
+	}
+
 	/** The bank proper was read: it now holds everything, so the deposits are folded in. Returns true if there were any. */
 	boolean onBankRead() {
 		seeded = true; // the server's old figure is superseded by the bank read

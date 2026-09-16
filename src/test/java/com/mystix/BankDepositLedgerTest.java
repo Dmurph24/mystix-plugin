@@ -56,4 +56,13 @@ public class BankDepositLedgerTest {
 		l.onItemsRemoved(qty(13439, 1), 100);
 		assertEquals(Integer.valueOf(10), l.contents().get(13439));
 	}
+
+	@Test
+	public void aContainerEmptiedIntoADepositBoxCountsAsDeposited() {
+		BankDepositLedger l = new BankDepositLedger(Map::of);
+		l.onContainerEmptied(qty(13439, 28));
+		assertEquals(Integer.valueOf(28), l.contents().get(13439));
+		l.onBankRead();
+		assertTrue(l.contents().isEmpty());
+	}
 }

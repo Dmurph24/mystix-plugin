@@ -223,6 +223,7 @@ public class MystixPlugin extends Plugin {
 		storageItemMonitor.setGoalItems(goalProgressTracker::ownedGoalItemIds);
 		storageItemMonitor.setSeedSupplier(goalProgressTracker::serverHeldFor);
 		bankMemoryMonitor.setSeedSupplier(goalProgressTracker::serverHeldFor);
+		storageItemMonitor.setEmptiedToDepositBoxListener(bankMemoryMonitor::onContainerEmptiedToDepositBox);
 		runePouchMonitor.setSnapshotListener(goalProgressTracker::onContainerSnapshot);
 		plankSackMonitor.setSnapshotListener(goalProgressTracker::onContainerSnapshot);
 		storageItemMonitor.setSnapshotListener(goalProgressTracker::onContainerSnapshot);
@@ -303,6 +304,7 @@ public class MystixPlugin extends Plugin {
 		storageItemMonitor.setGoalItems(null);
 		storageItemMonitor.setSeedSupplier(null);
 		bankMemoryMonitor.setSeedSupplier(null);
+		storageItemMonitor.setEmptiedToDepositBoxListener(null);
 		runePouchMonitor.setSnapshotListener(null);
 		plankSackMonitor.setSnapshotListener(null);
 		storageItemMonitor.setSnapshotListener(null);

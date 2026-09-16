@@ -29,8 +29,11 @@ import net.runelite.api.events.GameTick;
 import net.runelite.api.events.ItemContainerChanged;
 import net.runelite.api.events.MenuOptionClicked;
 import net.runelite.api.events.StatChanged;
+import net.runelite.api.events.WidgetClosed;
 import net.runelite.api.events.WidgetLoaded;
+import net.runelite.api.gameval.InterfaceID;
 import net.runelite.api.gameval.InventoryID;
+import java.util.function.Consumer;
 import net.runelite.api.widgets.Widget;
 import net.runelite.client.callback.ClientThread;
 import net.runelite.client.eventbus.Subscribe;
@@ -110,6 +113,14 @@ public class StorageItemMonitor {
 	private Map<Integer, Integer> inventoryQuantities = new HashMap<>();
 	private GameState previousGameState = GameState.UNKNOWN;
 	private boolean pushAll;
+	private boolean bankOpen;
+	private boolean depositBoxOpen;
+	/** Receives a container's contents when it is emptied into a deposit box (no bank container follows); set by the plugin. */
+	private volatile Consumer<Map<Integer, Integer>> emptiedToDepositBoxListener;
+
+	public void setEmptiedToDepositBoxListener(Consumer<Map<Integer, Integer>> listener) {
+		this.emptiedToDepositBoxListener = listener;
+	}
 
 	private volatile BiConsumer<String, Map<Integer, Integer>> snapshotListener;
 	/** Source to what the server last held for the goal items in it; set by the plugin from the goal tracker. */
@@ -314,15 +325,47 @@ public class StorageItemMonitor {
 			return;
 		}
 		for (Tracked t : tracked) {
-			if (t.ledger.spec.isContainerItem(itemId)) {
-				t.actionTicks.put(action, client.getTickCount());
+			if (!t.ledger.spec.isContainerItem(itemId)) {
+				continue;
 			}
+			t.actionTicks.put(action, client.getTickCount());
+			if (action == Action.EMPTY && (bankOpen || depositBoxOpen)) {
+				// Emptied straight into the bank: the bank snapshot (or the
+				// deposit overlay) takes the items, so the ledger lets go of
+				// them now rather than waiting for a message the game may not
+				// send for the item's own Empty option.
+				Map<Integer, Integer> contents = t.ledger.contents();
+				t.ledger.clear();
+				if (!bankOpen && !contents.isEmpty()) {
+					Consumer<Map<Integer, Integer>> listener = emptiedToDepositBoxListener;
+					if (listener != null) {
+						listener.accept(contents);
+					}
+				}
+			}
+		}
+	}
+
+	@Subscribe
+	public void onWidgetClosed(WidgetClosed event) {
+		if (event.getGroupId() == InterfaceID.BANKMAIN) {
+			bankOpen = false;
+		} else if (event.getGroupId() == InterfaceID.BANK_DEPOSITBOX) {
+			depositBoxOpen = false;
 		}
 	}
 
 	/** The Check listing for barrels, baskets and the coal bag arrives in a message box. */
 	@Subscribe
 	public void onWidgetLoaded(WidgetLoaded event) {
+		if (event.getGroupId() == InterfaceID.BANKMAIN) {
+			bankOpen = true;
+			return;
+		}
+		if (event.getGroupId() == InterfaceID.BANK_DEPOSITBOX) {
+			depositBoxOpen = true;
+			return;
+		}
 		if (event.getGroupId() != MESSAGEBOX_GROUP) {
 			return;
 		}
