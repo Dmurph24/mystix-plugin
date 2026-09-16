@@ -106,10 +106,10 @@ public class BankMemoryMonitor {
 	@Subscribe
 	public void onGameStateChanged(GameStateChanged event) {
 		GameState newState = event.getGameState();
-		if (previousGameState == GameState.LOGGED_IN && newState != GameState.LOGGED_IN) {
-			// Containers are still readable on the transition: a final sync,
-			// always, of whatever changed since the last upload.
-			push(true, true);
+		if (SyncGuard.isLogout(previousGameState, newState)) {
+			// A final sync, always: whatever changed since the last upload was
+			// captured while logged in. Do not re-read the client here: the
+			// player name is already gone and the containers may read empty.
 			syncer.flushPending();
 		}
 		previousGameState = newState;

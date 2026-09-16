@@ -100,7 +100,7 @@ public class VaultMonitor {
 	@Subscribe
 	public void onGameStateChanged(GameStateChanged event) {
 		GameState newState = event.getGameState();
-		if (previousGameState == GameState.LOGGED_IN && newState != GameState.LOGGED_IN) {
+		if (SyncGuard.isLogout(previousGameState, newState)) {
 			syncer.flushPending();
 		}
 		previousGameState = newState;

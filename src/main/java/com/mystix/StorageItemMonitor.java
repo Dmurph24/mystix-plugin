@@ -184,7 +184,7 @@ public class StorageItemMonitor {
 				readContainer(InventoryID.INV);
 				readContainer(InventoryID.WORN);
 			});
-		} else if (previousGameState == GameState.LOGGED_IN && newState != GameState.LOGGED_IN) {
+		} else if (SyncGuard.isLogout(previousGameState, newState)) {
 			for (Tracked t : tracked) {
 				t.syncer.flushPending();
 				t.ledger.resetSession();

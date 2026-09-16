@@ -79,4 +79,13 @@ public class SyncGuardTest
 		assertFalse(SyncGuard.isCompleteAppKeyEntry(
 			"timetracking", MystixConfig.APP_KEY, FULL_KEY));
 	}
+
+	@Test
+	public void onlyTheLoginScreenIsALogout() {
+		assertTrue(SyncGuard.isLogout(net.runelite.api.GameState.LOGGED_IN, net.runelite.api.GameState.LOGIN_SCREEN));
+		assertTrue(SyncGuard.isLogout(net.runelite.api.GameState.CONNECTION_LOST, net.runelite.api.GameState.LOGIN_SCREEN));
+		assertFalse(SyncGuard.isLogout(net.runelite.api.GameState.LOGGED_IN, net.runelite.api.GameState.LOADING));
+		assertFalse(SyncGuard.isLogout(net.runelite.api.GameState.LOGGED_IN, net.runelite.api.GameState.HOPPING));
+		assertFalse(SyncGuard.isLogout(net.runelite.api.GameState.LOGIN_SCREEN, net.runelite.api.GameState.LOGIN_SCREEN_AUTHENTICATOR));
+	}
 }

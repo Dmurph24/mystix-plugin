@@ -101,7 +101,7 @@ public class RunePouchMonitor {
 		GameState newState = event.getGameState();
 		if (newState == GameState.LOGGED_IN && previousGameState != GameState.LOGGED_IN) {
 			dirty = true; // push the pouch as it is at login
-		} else if (previousGameState == GameState.LOGGED_IN && newState != GameState.LOGGED_IN) {
+		} else if (SyncGuard.isLogout(previousGameState, newState)) {
 			syncer.flushPending();
 		}
 		previousGameState = newState;

@@ -98,7 +98,7 @@ public class PlankSackMonitor {
 		GameState newState = event.getGameState();
 		if (newState == GameState.LOGGED_IN && previousGameState != GameState.LOGGED_IN) {
 			dirty = true;
-		} else if (previousGameState == GameState.LOGGED_IN && newState != GameState.LOGGED_IN) {
+		} else if (SyncGuard.isLogout(previousGameState, newState)) {
 			syncer.flushPending();
 		}
 		previousGameState = newState;
