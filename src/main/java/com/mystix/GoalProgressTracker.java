@@ -109,21 +109,23 @@ public class GoalProgressTracker implements GoalProgressState.SyncHooks {
 		state.onInventoryChanged(equipment, quantities);
 	}
 
-	/** A bank upload was built: its bank section becomes this session's bank
-	 * snapshot (ids folded onto the unnoted item). Inventory is tracked live. */
+	/** A bank upload was built: its bank section (and any deposit-box deposits)
+	 * become this session's snapshots for those sources (ids folded onto the
+	 * unnoted item). Inventory is tracked live from container events. */
 	public void onBankPayload(BankSyncPayload payload) {
 		if (payload == null) {
 			return;
 		}
-		List<BankSyncPayload.BankItem> bank = payload.getItems().get(BankMemoryMonitor.SOURCE_BANK);
-		if (bank == null) {
-			return;
+		for (Map.Entry<String, List<BankSyncPayload.BankItem>> e : payload.getItems().entrySet()) {
+			if (BankMemoryMonitor.SOURCE_INVENTORY.equals(e.getKey()) || e.getValue() == null) {
+				continue;
+			}
+			Map<Integer, Integer> quantities = new HashMap<>();
+			for (BankSyncPayload.BankItem item : e.getValue()) {
+				quantities.merge(canonicalItemId(item.getItemId()), item.getQuantity(), Integer::sum);
+			}
+			state.onContainerSnapshot(e.getKey(), quantities);
 		}
-		Map<Integer, Integer> quantities = new HashMap<>();
-		for (BankSyncPayload.BankItem item : bank) {
-			quantities.merge(canonicalItemId(item.getItemId()), item.getQuantity(), Integer::sum);
-		}
-		state.onBankSnapshot(quantities);
 	}
 
 	/**
@@ -253,6 +255,16 @@ public class GoalProgressTracker implements GoalProgressState.SyncHooks {
 
 	public void clear() {
 		state.clearAll();
+	}
+
+	/** What the server last held in a bank-memory source for each in-progress owned goal's item. */
+	public Map<Integer, Integer> serverHeldFor(String source) {
+		return state.serverHeldFor(source);
+	}
+
+	/** Item ids of owned-item goals still in progress: the sources holding them upload on the short debounce. */
+	public Set<Integer> ownedGoalItemIds() {
+		return state.ownedGoalItemIds();
 	}
 
 	// ----------------------------------------------------------------- reads

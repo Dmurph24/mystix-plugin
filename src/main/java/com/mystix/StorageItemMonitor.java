@@ -11,6 +11,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.function.BiConsumer;
+import java.util.function.Supplier;
 import javax.inject.Inject;
 import javax.inject.Singleton;
 import lombok.extern.slf4j.Slf4j;
@@ -28,8 +29,11 @@ import net.runelite.api.events.GameTick;
 import net.runelite.api.events.ItemContainerChanged;
 import net.runelite.api.events.MenuOptionClicked;
 import net.runelite.api.events.StatChanged;
+import net.runelite.api.events.WidgetClosed;
 import net.runelite.api.events.WidgetLoaded;
+import net.runelite.api.gameval.InterfaceID;
 import net.runelite.api.gameval.InventoryID;
+import java.util.function.Consumer;
 import net.runelite.api.widgets.Widget;
 import net.runelite.client.callback.ClientThread;
 import net.runelite.client.eventbus.Subscribe;
@@ -60,7 +64,10 @@ public class StorageItemMonitor {
 		final Map<Action, Integer> actionTicks = new HashMap<>();
 
 		Tracked(StorageItemSpec spec) {
-			this.ledger = new StorageItemLedger(spec, StorageItemMonitor.this::itemName);
+			this.ledger = new StorageItemLedger(spec, StorageItemMonitor.this::itemName, () -> {
+				java.util.function.Function<String, Map<Integer, Integer>> s = seedSupplier;
+				return s == null ? Map.of() : s.apply(spec.source);
+			});
 			this.syncer = new SourceSyncer(spec.source, gson, executor,
 					() -> config.syncBankMemory() && SyncGuard.hasAppKey(config) && !GameModeUtil.isSpecialGameMode(client),
 					() -> SyncGuard.getPlayerUsername(client),
@@ -106,8 +113,22 @@ public class StorageItemMonitor {
 	private Map<Integer, Integer> inventoryQuantities = new HashMap<>();
 	private GameState previousGameState = GameState.UNKNOWN;
 	private boolean pushAll;
+	private boolean bankOpen;
+	private boolean depositBoxOpen;
+	/** Receives a container's contents when it is emptied into a deposit box (no bank container follows); set by the plugin. */
+	private volatile Consumer<Map<Integer, Integer>> emptiedToDepositBoxListener;
+
+	public void setEmptiedToDepositBoxListener(Consumer<Map<Integer, Integer>> listener) {
+		this.emptiedToDepositBoxListener = listener;
+	}
 
 	private volatile BiConsumer<String, Map<Integer, Integer>> snapshotListener;
+	/** Source to what the server last held for the goal items in it; set by the plugin from the goal tracker. */
+	private volatile java.util.function.Function<String, Map<Integer, Integer>> seedSupplier;
+
+	public void setSeedSupplier(java.util.function.Function<String, Map<Integer, Integer>> supplier) {
+		this.seedSupplier = supplier;
+	}
 
 	@Inject
 	public StorageItemMonitor(
@@ -133,6 +154,13 @@ public class StorageItemMonitor {
 	/** Receives every ledger change (source, item id to quantity), before any sync gate. */
 	public void setSnapshotListener(BiConsumer<String, Map<Integer, Integer>> listener) {
 		this.snapshotListener = listener;
+	}
+
+	/** Item ids active owned-item goals are counting (short debounce for them); set by the plugin. */
+	public void setGoalItems(Supplier<Set<Integer>> goalItems) {
+		for (Tracked t : tracked) {
+			t.syncer.setGoalItems(goalItems);
+		}
 	}
 
 	public void stop() {
@@ -166,11 +194,11 @@ public class StorageItemMonitor {
 			clientThread.invokeLater(() -> {
 				readContainer(InventoryID.INV);
 				readContainer(InventoryID.WORN);
-				pushAll = true; // ledgers persist across logins; re-announce them
 			});
-		} else if (previousGameState == GameState.LOGGED_IN && newState != GameState.LOGGED_IN) {
+		} else if (SyncGuard.isLogout(previousGameState, newState)) {
 			for (Tracked t : tracked) {
 				t.syncer.flushPending();
+				t.ledger.resetSession();
 			}
 		}
 		previousGameState = newState;
@@ -297,15 +325,47 @@ public class StorageItemMonitor {
 			return;
 		}
 		for (Tracked t : tracked) {
-			if (t.ledger.spec.isContainerItem(itemId)) {
-				t.actionTicks.put(action, client.getTickCount());
+			if (!t.ledger.spec.isContainerItem(itemId)) {
+				continue;
 			}
+			t.actionTicks.put(action, client.getTickCount());
+			if (action == Action.EMPTY && (bankOpen || depositBoxOpen)) {
+				// Emptied straight into the bank: the bank snapshot (or the
+				// deposit overlay) takes the items, so the ledger lets go of
+				// them now rather than waiting for a message the game may not
+				// send for the item's own Empty option.
+				Map<Integer, Integer> contents = t.ledger.contents();
+				t.ledger.clear();
+				if (!bankOpen && !contents.isEmpty()) {
+					Consumer<Map<Integer, Integer>> listener = emptiedToDepositBoxListener;
+					if (listener != null) {
+						listener.accept(contents);
+					}
+				}
+			}
+		}
+	}
+
+	@Subscribe
+	public void onWidgetClosed(WidgetClosed event) {
+		if (event.getGroupId() == InterfaceID.BANKMAIN) {
+			bankOpen = false;
+		} else if (event.getGroupId() == InterfaceID.BANK_DEPOSITBOX) {
+			depositBoxOpen = false;
 		}
 	}
 
 	/** The Check listing for barrels, baskets and the coal bag arrives in a message box. */
 	@Subscribe
 	public void onWidgetLoaded(WidgetLoaded event) {
+		if (event.getGroupId() == InterfaceID.BANKMAIN) {
+			bankOpen = true;
+			return;
+		}
+		if (event.getGroupId() == InterfaceID.BANK_DEPOSITBOX) {
+			depositBoxOpen = true;
+			return;
+		}
 		if (event.getGroupId() != MESSAGEBOX_GROUP) {
 			return;
 		}
@@ -329,7 +389,9 @@ public class StorageItemMonitor {
 		pushAll = false;
 		for (Tracked t : tracked) {
 			boolean changed = t.ledger.settle(t.open());
-			if (!changed && !push) {
+			// Nothing is said about a container this session has not observed:
+			// the server's figure stands until there is something better.
+			if (!changed && !(push && t.ledger.isKnown())) {
 				continue;
 			}
 			Map<Integer, Integer> contents = t.ledger.contents();

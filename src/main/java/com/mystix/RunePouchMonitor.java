@@ -4,6 +4,8 @@ import com.google.gson.Gson;
 import com.mystix.api.MystixApiClient;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.Set;
+import java.util.function.Supplier;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.function.BiConsumer;
 import java.util.function.IntUnaryOperator;
@@ -67,6 +69,11 @@ public class RunePouchMonitor {
 		this.snapshotListener = listener;
 	}
 
+	/** Item ids active owned-item goals are counting (short debounce for them); set by the plugin. */
+	public void setGoalItems(Supplier<Set<Integer>> goalItems) {
+		syncer.setGoalItems(goalItems);
+	}
+
 	public void stop() {
 		syncer.stop();
 		dirty = false;
@@ -94,7 +101,7 @@ public class RunePouchMonitor {
 		GameState newState = event.getGameState();
 		if (newState == GameState.LOGGED_IN && previousGameState != GameState.LOGGED_IN) {
 			dirty = true; // push the pouch as it is at login
-		} else if (previousGameState == GameState.LOGGED_IN && newState != GameState.LOGGED_IN) {
+		} else if (SyncGuard.isLogout(previousGameState, newState)) {
 			syncer.flushPending();
 		}
 		previousGameState = newState;

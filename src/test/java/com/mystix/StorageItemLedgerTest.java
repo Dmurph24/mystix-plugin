@@ -221,6 +221,29 @@ public class StorageItemLedgerTest {
 	}
 
 	@Test
+	public void unknownLedgerSeedsFromTheServerOnFirstSignalOnly() {
+		Map<Integer, Integer> server = new HashMap<>();
+		server.put(ItemID.RAW_ANGLERFISH, 2);
+		StorageItemLedger l = new StorageItemLedger(StorageItemSpec.fishBarrel(),
+				id -> NAMES.getOrDefault(id, "Item " + id), () -> server);
+		assertFalse(l.isKnown());
+		assertFalse(l.settle(true));
+		assertTrue("nothing observed yet", l.contents().isEmpty());
+		// First catch of the session builds on the server's 2.
+		l.onGatherMessage("You catch an anglerfish!");
+		l.settle(true);
+		assertTrue(l.isKnown());
+		assertEquals(Integer.valueOf(3), l.contents().get(ItemID.RAW_ANGLERFISH));
+		// Next session: unknown again until a signal, and re-seeded from whatever the server has then.
+		l.resetSession();
+		server.put(ItemID.RAW_ANGLERFISH, 10);
+		assertFalse(l.isKnown());
+		l.onGameMessage("The barrel is full. It may be emptied at a bank.");
+		assertTrue(l.isKnown());
+		assertEquals(Integer.valueOf(10), l.contents().get(ItemID.RAW_ANGLERFISH));
+	}
+
+	@Test
 	public void singularisesCheckNames() {
 		assertEquals("sapphire", StorageItemLedger.singular("Sapphires"));
 		assertEquals("ruby", StorageItemLedger.singular("Rubies"));
