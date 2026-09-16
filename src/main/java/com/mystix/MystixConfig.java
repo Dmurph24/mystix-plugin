@@ -47,7 +47,7 @@ public interface MystixConfig extends Config {
 	@ConfigItem(
 			keyName = "syncBankMemory",
 			name = "Bank Memory",
-			description = "Sync your bank, seed vault, looting bag, potion storage, boat cargo holds and storage items (fish barrel, herb sack, seed box, ...) to Mystix.",
+			description = "Sync your bank, seed vault, looting bag, potion storage, boat cargo holds, rune pouch, plank sack and storage items (fish barrel, herb sack, log basket, gem bag, coal bag, seed box, ...) to Mystix.",
 			section = SYNC_SECTION,
 			position = 1)
 	default boolean syncBankMemory() {

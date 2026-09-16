@@ -59,6 +59,12 @@ public class MystixPlugin extends Plugin {
 	private RunePouchMonitor runePouchMonitor;
 
 	@Inject
+	private PlankSackMonitor plankSackMonitor;
+
+	@Inject
+	private StorageItemMonitor storageItemMonitor;
+
+	@Inject
 	private LoadoutMonitor loadoutMonitor;
 
 	@Inject
@@ -168,6 +174,8 @@ public class MystixPlugin extends Plugin {
 		eventBus.register(vaultMonitor);
 		eventBus.register(potionStorageMonitor);
 		eventBus.register(runePouchMonitor);
+		eventBus.register(plankSackMonitor);
+		eventBus.register(storageItemMonitor);
 		eventBus.register(loadoutMonitor);
 		eventBus.register(lootMonitor);
 		eventBus.register(collectionLogMonitor);
@@ -208,7 +216,13 @@ public class MystixPlugin extends Plugin {
 		bankMemoryMonitor.setPayloadListener(goalProgressTracker::onBankPayload);
 		vaultMonitor.setSnapshotListener(goalProgressTracker::onContainerSnapshot);
 		runePouchMonitor.setSnapshotListener(goalProgressTracker::onContainerSnapshot);
-		goalProgressTracker.setStorageSyncNow(runePouchMonitor::syncNow);
+		plankSackMonitor.setSnapshotListener(goalProgressTracker::onContainerSnapshot);
+		storageItemMonitor.setSnapshotListener(goalProgressTracker::onContainerSnapshot);
+		goalProgressTracker.setStorageSyncNow(() -> {
+			runePouchMonitor.syncNow();
+			plankSackMonitor.syncNow();
+			storageItemMonitor.syncNow();
+		});
 		roadmapManager.startPeriodicRefresh();
 
 		// Side-panel roadmap tab.
@@ -237,6 +251,8 @@ public class MystixPlugin extends Plugin {
 		eventBus.unregister(vaultMonitor);
 		eventBus.unregister(potionStorageMonitor);
 		eventBus.unregister(runePouchMonitor);
+		eventBus.unregister(plankSackMonitor);
+		eventBus.unregister(storageItemMonitor);
 		eventBus.unregister(loadoutMonitor);
 		eventBus.unregister(lootMonitor);
 		eventBus.unregister(collectionLogMonitor);
@@ -272,6 +288,8 @@ public class MystixPlugin extends Plugin {
 		bankMemoryMonitor.setPayloadListener(null);
 		vaultMonitor.setSnapshotListener(null);
 		runePouchMonitor.setSnapshotListener(null);
+		plankSackMonitor.setSnapshotListener(null);
+		storageItemMonitor.setSnapshotListener(null);
 		goalProgressTracker.setStorageSyncNow(null);
 		goalCompletionNotifier.clear();
 		goalProgressTracker.clear();
@@ -283,6 +301,8 @@ public class MystixPlugin extends Plugin {
 		vaultMonitor.stop();
 		potionStorageMonitor.stop();
 		runePouchMonitor.stop();
+		plankSackMonitor.stop();
+		storageItemMonitor.stop();
 		loadoutMonitor.stop();
 		lootMonitor.stop();
 		collectionLogMonitor.stop();
