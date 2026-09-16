@@ -34,4 +34,13 @@ public class VaultMonitorTest {
 		assertEquals("trawling_net", VaultMonitor.sourceFor(InventoryID.SAILING_TRAWLING_NET | VaultMonitor.REMOTE_CONTAINER_FLAG));
 		assertNull(VaultMonitor.sourceFor(InventoryID.SEED_VAULT | VaultMonitor.REMOTE_CONTAINER_FLAG));
 	}
+
+	@Test
+	public void currentHoldResolvesOnlyToCargoHolds() {
+		assertEquals("boat_cargo_hold_3", VaultMonitor.currentHoldSource(33733));
+		assertEquals("boat_cargo_hold_1", VaultMonitor.currentHoldSource(InventoryID.SAILING_BOAT_1_CARGOHOLD));
+		assertNull(VaultMonitor.currentHoldSource(InventoryID.SAILING_TRAWLING_NET));
+		assertNull(VaultMonitor.currentHoldSource(0));
+		assertNull(VaultMonitor.currentHoldSource(-1));
+	}
 }

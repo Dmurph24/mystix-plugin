@@ -9,6 +9,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.function.BiConsumer;
+import java.util.function.Consumer;
 import java.util.function.Supplier;
 import javax.inject.Inject;
 import javax.inject.Singleton;
@@ -18,6 +19,8 @@ import net.runelite.api.GameState;
 import net.runelite.api.ItemContainer;
 import net.runelite.api.events.GameStateChanged;
 import net.runelite.api.events.ItemContainerChanged;
+import net.runelite.api.events.MenuOptionClicked;
+import net.runelite.api.gameval.VarPlayerID;
 import net.runelite.api.gameval.InventoryID;
 import net.runelite.client.eventbus.Subscribe;
 import net.runelite.client.game.ItemManager;
@@ -69,10 +72,21 @@ public class VaultMonitor {
 		return source;
 	}
 
+	/** Crew member option that banks the current boat's hold without any container event reaching the client. */
+	static final String BANK_CARGO_OPTION = "Bank-cargo";
+
 	private final Client client;
 	private final ItemManager itemManager;
 	private final SourceSyncer syncer;
 	private GameState previousGameState = GameState.UNKNOWN;
+	/** Contents last read this session, per source. */
+	private final Map<String, Map<Integer, Integer>> lastRead = new HashMap<>();
+	/** Receives the hold's contents when a crew member banks them; set by the plugin. */
+	private volatile Consumer<Map<Integer, Integer>> cargoBankedListener;
+
+	public void setCargoBankedListener(Consumer<Map<Integer, Integer>> listener) {
+		this.cargoBankedListener = listener;
+	}
 
 	/** Receives every container read (source, canonical item id to quantity),
 	 * before any sync gate, so goal progress moves even with sync disabled. */
@@ -105,6 +119,54 @@ public class VaultMonitor {
 
 	public void stop() {
 		syncer.stop();
+		lastRead.clear();
+	}
+
+	/** The source of the current boat's hold, from the Sailing varp holding its inventory id, or null. */
+	static String currentHoldSource(int holdInventoryId) {
+		String source = sourceFor(holdInventoryId);
+		return source != null && source.startsWith("boat_cargo_hold_") ? source : null;
+	}
+
+	/**
+	 * "Bank-cargo" on a crew member moves the hold into the bank with no
+	 * container event, so the bank would count the items again on its next
+	 * read while the hold snapshot still held them. Hand the hold's contents
+	 * to the bank-deposits overlay (cleared when the bank is read) and empty
+	 * the hold locally and on the server.
+	 */
+	@Subscribe
+	public void onMenuOptionClicked(MenuOptionClicked event) {
+		if (!BANK_CARGO_OPTION.equalsIgnoreCase(event.getMenuOption())) {
+			return;
+		}
+		String current = currentHoldSource(client.getVarpValue(VarPlayerID.SAILING_BOAT_CARGOHOLD_INV));
+		Map<Integer, Integer> banked = new LinkedHashMap<>();
+		Map<String, Map<Integer, Integer>> emptied = new LinkedHashMap<>();
+		for (Map.Entry<String, Map<Integer, Integer>> e : lastRead.entrySet()) {
+			boolean hold = e.getKey().startsWith("boat_cargo_hold_");
+			if (!hold || e.getValue().isEmpty() || (current != null && !current.equals(e.getKey()))) {
+				continue;
+			}
+			e.getValue().forEach((id, qty) -> banked.merge(id, qty, Integer::sum));
+			emptied.put(e.getKey(), new LinkedHashMap<>());
+		}
+		log.debug("Bank-cargo: current hold {} -> banking {} from {}", current, banked, emptied.keySet());
+		if (emptied.isEmpty()) {
+			return;
+		}
+		BiConsumer<String, Map<Integer, Integer>> listener = snapshotListener;
+		for (String source : emptied.keySet()) {
+			lastRead.put(source, new LinkedHashMap<>());
+			if (listener != null) {
+				listener.accept(source, new LinkedHashMap<>());
+			}
+		}
+		Consumer<Map<Integer, Integer>> bankedListener = cargoBankedListener;
+		if (bankedListener != null) {
+			bankedListener.accept(banked);
+		}
+		syncer.submitSources(emptied, true);
 	}
 
 	@Subscribe
@@ -130,6 +192,7 @@ public class VaultMonitor {
 		Map<Integer, Integer> itemQuantities = new LinkedHashMap<>();
 		ItemCollector.collectItems(container, itemManager, itemQuantities);
 		log.debug("Container {} ({}) read: {} distinct items", event.getContainerId(), source, itemQuantities.size());
+		lastRead.put(source, new LinkedHashMap<>(itemQuantities));
 
 		BiConsumer<String, Map<Integer, Integer>> listener = snapshotListener;
 		if (listener != null) {
