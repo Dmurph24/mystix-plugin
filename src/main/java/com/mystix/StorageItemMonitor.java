@@ -36,7 +36,9 @@ import net.runelite.api.gameval.InventoryID;
 import java.util.function.Consumer;
 import net.runelite.api.widgets.Widget;
 import net.runelite.client.callback.ClientThread;
+import net.runelite.client.config.ConfigManager;
 import net.runelite.client.eventbus.Subscribe;
+import net.runelite.client.events.ConfigChanged;
 import net.runelite.client.game.ItemManager;
 
 /**
@@ -105,6 +107,7 @@ public class StorageItemMonitor {
 	private final ItemManager itemManager;
 	private final Gson gson;
 	private final ScheduledExecutorService executor;
+	private final ConfigManager configManager;
 
 	private final List<Tracked> tracked = new ArrayList<>();
 	private final Set<Integer> inventoryIds = new HashSet<>();
@@ -138,7 +141,8 @@ public class StorageItemMonitor {
 			MystixApiClient apiClient,
 			ItemManager itemManager,
 			Gson gson,
-			ScheduledExecutorService executor) {
+			ScheduledExecutorService executor,
+			ConfigManager configManager) {
 		this.client = client;
 		this.clientThread = clientThread;
 		this.config = config;
@@ -146,6 +150,7 @@ public class StorageItemMonitor {
 		this.itemManager = itemManager;
 		this.gson = gson;
 		this.executor = executor;
+		this.configManager = configManager;
 		for (StorageItemSpec spec : StorageItemSpec.all()) {
 			tracked.add(new Tracked(spec));
 		}
@@ -194,6 +199,7 @@ public class StorageItemMonitor {
 			clientThread.invokeLater(() -> {
 				readContainer(InventoryID.INV);
 				readContainer(InventoryID.WORN);
+				adoptChargesPluginState(ChargesPluginBridge.readAll(configManager::getConfiguration));
 			});
 		} else if (SyncGuard.isLogout(previousGameState, newState)) {
 			for (Tracked t : tracked) {
@@ -208,6 +214,48 @@ public class StorageItemMonitor {
 	public void onItemContainerChanged(ItemContainerChanged event) {
 		if (event.getContainerId() == InventoryID.INV || event.getContainerId() == InventoryID.WORN) {
 			readContainer(event.getContainerId());
+		}
+	}
+
+	/**
+	 * The Charges Improved plugin wrote a storage it tracks: its state is
+	 * exact, so it replaces ours for that source. Read-only on our side.
+	 */
+	@Subscribe
+	public void onConfigChanged(ConfigChanged event) {
+		if (!ChargesPluginBridge.CONFIG_GROUP.equals(event.getGroup())) {
+			return;
+		}
+		String source = ChargesPluginBridge.sourceForConfigKey(event.getKey());
+		if (source == null) {
+			return;
+		}
+		// Re-read every key that folds into the source (the herb sack and its
+		// silk-lined variant share one) so a change to either lands correctly.
+		Map<Integer, Integer> merged = new LinkedHashMap<>();
+		boolean any = false;
+		for (String key : ChargesPluginBridge.keysFor(source)) {
+			Map<Integer, Integer> contents = ChargesPluginBridge.parse(
+					configManager.getConfiguration(ChargesPluginBridge.CONFIG_GROUP, key));
+			if (contents != null) {
+				any = true;
+				contents.forEach((id, qty) -> merged.merge(id, qty, Integer::sum));
+			}
+		}
+		if (any) {
+			Map<String, Map<Integer, Integer>> one = new LinkedHashMap<>();
+			one.put(source, merged);
+			adoptChargesPluginState(one);
+		}
+	}
+
+	private void adoptChargesPluginState(Map<String, Map<Integer, Integer>> bySource) {
+		for (Tracked t : tracked) {
+			Map<Integer, Integer> contents = bySource.get(t.ledger.spec.source);
+			if (contents != null) {
+				log.debug("{}: adopting Charges Improved state {}", t.ledger.spec.source, contents);
+				t.ledger.resync(contents);
+			}
 		}
 	}
 
@@ -261,10 +309,15 @@ public class StorageItemMonitor {
 			}
 		} else if (event.getType() == ChatMessageType.GAMEMESSAGE) {
 			// Every carried ledger sees the line: "You empty all of your
-			// containers into the bank." applies to all of them at once.
+			// containers into the bank." applies to all of them at once. Some
+			// store lines ("You put the Grimy X herb into your herb sack.",
+			// thieving into a gem bag) are game messages rather than spam.
 			for (Tracked t : tracked) {
 				if (t.carried()) {
 					t.ledger.onGameMessage(message);
+					if (t.open()) {
+						t.ledger.onGatherMessage(message);
+					}
 				}
 			}
 		}
@@ -313,6 +366,12 @@ public class StorageItemMonitor {
 		}
 		String option = event.getMenuOption();
 		if (option == null) {
+			return;
+		}
+		if (option.equalsIgnoreCase("Pick")) {
+			for (Tracked t : tracked) {
+				t.ledger.onPickTarget(event.getMenuTarget());
+			}
 			return;
 		}
 		if (option.equalsIgnoreCase("Fill")) {

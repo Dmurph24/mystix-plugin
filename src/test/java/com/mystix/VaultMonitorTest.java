@@ -32,7 +32,7 @@ public class VaultMonitorTest {
 		assertEquals("boat_cargo_hold_3", VaultMonitor.sourceFor(33733));
 		assertEquals("boat_cargo_hold_1", VaultMonitor.sourceFor(InventoryID.SAILING_BOAT_1_CARGOHOLD | VaultMonitor.REMOTE_CONTAINER_FLAG));
 		assertEquals("trawling_net", VaultMonitor.sourceFor(InventoryID.SAILING_TRAWLING_NET | VaultMonitor.REMOTE_CONTAINER_FLAG));
-		assertNull(VaultMonitor.sourceFor(InventoryID.SEED_VAULT | VaultMonitor.REMOTE_CONTAINER_FLAG));
+		assertEquals("seed_vault", VaultMonitor.sourceFor(InventoryID.SEED_VAULT | VaultMonitor.REMOTE_CONTAINER_FLAG));
 	}
 
 	@Test

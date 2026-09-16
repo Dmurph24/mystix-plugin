@@ -33,8 +33,8 @@ final class StorageItemSpec {
 	final int capacity;
 	/** Per-item capacity, or 0 for none. */
 	final int perItemCapacity;
-	/** SPAM chat line emitted when an accepted item is gathered; group 1 is the item name. Null when the item has none. */
-	final Pattern gatherPattern;
+	/** Chat lines emitted when an accepted item is gathered or stored; group 1 is the item name. Empty when the item has none. */
+	final List<Pattern> gatherPatterns;
 	/** SPAM lines meaning "one more of the item just gathered". */
 	final Set<String> extraGatherMessages;
 	/** Exact GAMEMESSAGE lines meaning the container is now empty. */
@@ -65,7 +65,7 @@ final class StorageItemSpec {
 		this.acceptedIds = Set.copyOf(b.acceptedIds);
 		this.capacity = b.capacity;
 		this.perItemCapacity = b.perItemCapacity;
-		this.gatherPattern = b.gatherPattern;
+		this.gatherPatterns = List.copyOf(b.gatherPatterns);
 		this.extraGatherMessages = Set.copyOf(b.extraGatherMessages);
 		this.emptiedMessages = Set.copyOf(b.emptiedMessages);
 		this.emptiedPrefixes = Set.copyOf(b.emptiedPrefixes);
@@ -107,12 +107,13 @@ final class StorageItemSpec {
 						ItemID.RAW_DARK_CRAB, ItemID.SNAKEBOSS_EEL, ItemID.RAW_SWORDTIP_SQUID, ItemID.RAW_JUMBO_SQUID,
 						ItemID.AERIAL_FISHING_BLUEGILL, ItemID.AERIAL_FISHING_COMMON_TENCH,
 						ItemID.AERIAL_FISHING_MOTTLED_EEL, ItemID.AERIAL_FISHING_GREATER_SIREN,
-						ItemID.RAW_SEATURTLE, ItemID.RAW_MANTARAY)
+						ItemID.RAW_SEATURTLE, ItemID.RAW_MANTARAY, ItemID.RAW_GIANT_KRILL, ItemID.RAW_HADDOCK,
+						ItemID.RAW_YELLOWFIN, ItemID.RAW_HALIBUT, ItemID.RAW_BLUEFIN, ItemID.RAW_MARLIN)
 				.capacity(28)
 				.gather("^You catch (?:an?|some)(?: raw)? ([a-zA-Z ]+?)[.!]?(?: It hardens as you handle it with your ice gloves\\.)?$")
 				.extraGather("Rada's blessing enabled you to catch an extra fish.",
 						"The spirit flakes enabled you to catch an extra fish.")
-				.emptied("The barrel is empty.")
+				.emptied("The barrel is empty.", "Your barrel is empty.", "You empty the barrel.")
 				.full("The barrel is full. It may be emptied at a bank.")
 				.check("The barrel contains:", "The barrel is empty.")
 				.consumeSkill(Skill.COOKING)
@@ -132,6 +133,7 @@ final class StorageItemSpec {
 						ItemID.CAMPHOR_LOGS, ItemID.BLISTERWOOD_LOGS, ItemID.JUNIPER_LOGS)
 				.capacity(28)
 				.gather("^You get some ([a-zA-Z ]+?)\\.?$")
+				.gather("^You get some ([a-zA-Z ]+?) and give them to [A-Za-z ]+\\.$")
 				.extraGather("Your Kandarin headgear provides you with an additional log.",
 						"The nature offerings enabled you to chop an extra log.")
 				.emptied("You empty your basket into the bank.", "You empty your basket.",
@@ -151,8 +153,10 @@ final class StorageItemSpec {
 						ItemID.UNCUT_DRAGONSTONE, ItemID.UNCUT_OPAL, ItemID.UNCUT_JADE, ItemID.UNCUT_RED_TOPAZ)
 				.perItemCapacity(60)
 				.gather("^You just (?:mined|found) an? ([a-zA-Z ]+?)[.!]?$")
-				.emptiedPrefix("You empty your gem")
-				.emptied("The gem bag is now empty.", "The gem bag is empty.")
+				.gather("^You steal an uncut ([a-zA-Z ]+?) and add it to your gem [a-z]+\\.$")
+				.gather("^You put the stolen Uncut ([a-zA-Z ]+?) into your gem [a-z]+\\.$")
+				.emptiedPrefix("You empty your gem", "You empty the gem")
+				.emptiedPrefix("The gem bag is", "The gem pouch is", "The gem satchel is", "The gem tote is", "The gem sack is")
 				.check("", "The gem bag is empty.")
 				.stripPrefix("uncut ")
 				.build();
@@ -181,7 +185,8 @@ final class StorageItemSpec {
 				// safe: once a sack is full the herb lands in the inventory, which
 				// blocks the credit.
 				.perItemCapacity(100)
-				.emptiedPrefix("You empty your herb sack")
+				.gather("^You put the Grimy ([a-zA-Z ]+?) herb into your herb sack\\.$")
+				.emptiedPrefix("You empty your herb sack", "You empty the herb sack")
 				.emptied("The herb sack is empty.")
 				.check("You look in your herb sack and see:", "The herb sack is empty.")
 				.xpCreditSkill(Skill.FARMING)
@@ -212,7 +217,7 @@ final class StorageItemSpec {
 		final Set<Integer> acceptedIds = new java.util.LinkedHashSet<>();
 		int capacity;
 		int perItemCapacity;
-		Pattern gatherPattern;
+		final List<Pattern> gatherPatterns = new java.util.ArrayList<>();
 		final Set<String> extraGatherMessages = new java.util.HashSet<>();
 		final Set<String> emptiedMessages = new java.util.HashSet<>(CONTAINERS_EMPTIED_MESSAGES);
 		final Set<String> emptiedPrefixes = new java.util.HashSet<>();
@@ -234,7 +239,7 @@ final class StorageItemSpec {
 		Builder accepts(int... ids) { for (int id : ids) acceptedIds.add(id); return this; }
 		Builder capacity(int c) { capacity = c; return this; }
 		Builder perItemCapacity(int c) { perItemCapacity = c; return this; }
-		Builder gather(String regex) { gatherPattern = Pattern.compile(regex); return this; }
+		Builder gather(String regex) { gatherPatterns.add(Pattern.compile(regex)); return this; }
 		Builder extraGather(String... m) { Collections.addAll(extraGatherMessages, m); return this; }
 		Builder emptied(String... m) { Collections.addAll(emptiedMessages, m); return this; }
 		Builder emptiedPrefix(String... m) { Collections.addAll(emptiedPrefixes, m); return this; }

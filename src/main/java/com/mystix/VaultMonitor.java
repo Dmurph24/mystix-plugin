@@ -64,10 +64,7 @@ public class VaultMonitor {
 	static String sourceFor(int containerId) {
 		String source = VAULT_SOURCES.get(containerId);
 		if (source == null && (containerId & REMOTE_CONTAINER_FLAG) != 0) {
-			int base = containerId & ~REMOTE_CONTAINER_FLAG;
-			if (base >= InventoryID.SAILING_BOAT_1_CARGOHOLD && base <= InventoryID.SAILING_TRAWLING_NET) {
-				source = VAULT_SOURCES.get(base);
-			}
+			source = VAULT_SOURCES.get(containerId & ~REMOTE_CONTAINER_FLAG);
 		}
 		return source;
 	}
