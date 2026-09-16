@@ -289,11 +289,6 @@ public class StorageItemMonitor {
 
 	@Subscribe
 	public void onMenuOptionClicked(MenuOptionClicked event) {
-		if (log.isDebugEnabled()) {
-			Widget w = event.getWidget();
-			log.debug("Menu click: option='{}' target='{}' action={} itemId={} widget={}", event.getMenuOption(),
-					event.getMenuTarget(), event.getMenuAction(), event.getItemId(), w == null ? -1 : w.getId());
-		}
 		int itemId = -1;
 		Action action = null;
 		MenuAction menuAction = event.getMenuAction();
@@ -363,7 +358,6 @@ public class StorageItemMonitor {
 	/** The Check listing for barrels, baskets and the coal bag arrives in a message box. */
 	@Subscribe
 	public void onWidgetLoaded(WidgetLoaded event) {
-		log.debug("Interface opened: group={}", event.getGroupId());
 		if (event.getGroupId() == InterfaceID.BANKMAIN) {
 			bankOpen = true;
 			return;
