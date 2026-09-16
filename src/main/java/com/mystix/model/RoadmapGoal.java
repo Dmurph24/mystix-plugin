@@ -6,6 +6,7 @@ import java.time.OffsetDateTime;
 import java.time.format.DateTimeParseException;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 
 /**
  * A single goal within a roadmap, as returned by the roadmap detail/recompute
@@ -159,6 +160,9 @@ public class RoadmapGoal {
 
 		@SerializedName("held_vaults")
 		private Integer heldVaults;
+
+		@SerializedName("held_by_source")
+		private Map<String, Integer> heldBySource;
 	}
 
 	public String getGoalType() {
@@ -247,6 +251,15 @@ public class RoadmapGoal {
 	/** Owned-item goals: quantity in vaults (seed vault, looting bag, potion storage). */
 	public Integer getHeldVaults() {
 		return meta == null ? null : meta.heldVaults;
+	}
+
+	/**
+	 * Owned-item goals: quantity per bank-sync source (bank, vaults, cargo
+	 * holds, storage items) as the server last saw them; null from older
+	 * servers that only send {@code held_bank} / {@code held_vaults}.
+	 */
+	public Map<String, Integer> getHeldBySource() {
+		return meta == null ? null : meta.heldBySource;
 	}
 
 	/** Farming goals: the produce item id the goal matches timers by; null otherwise. */

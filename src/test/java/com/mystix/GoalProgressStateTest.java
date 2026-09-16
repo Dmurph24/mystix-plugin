@@ -552,13 +552,110 @@ public class GoalProgressStateTest {
 		state.onInventoryChanged(false, new HashMap<>());
 		assertEquals(40, state.progressFor(goal(r, 1)).getCurrent());
 
-		// Cut 60 more: 140 held -> complete, forced sync, popup once.
+		// Cut 60 more: 140 held -> complete once the tick settles, forced sync, popup once.
 		state.onInventoryChanged(false, qty(1511, 60));
+		assertEquals(0, hooks.bankSyncs);
+		state.settleOwned();
 		GoalProgressView v = state.progressFor(goal(r, 1));
 		assertTrue(v.isComplete());
 		assertEquals(100, v.getCurrent());
 		assertEquals(1, hooks.bankSyncs);
 		assertEquals(Collections.singletonList(1), hooks.completedGoalIds);
+	}
+
+	@Test
+	public void ownedItemGoalCountsContainerSnapshotsPerSource() {
+		// Server: 30 in the bank, 5 already in boat 1's hold. Wants 100 more.
+		Roadmap r = roadmap(1, goalJson(1, "item_owned", 0, 100, false,
+				"{\"item_id\":13439,\"start_qty\":35,\"held_bank\":30,\"held_vaults\":5,"
+				+ "\"held_by_source\":{\"bank\":30,\"boat_cargo_hold_1\":5}}"));
+		state.onServerRoadmap(r);
+		state.onInventoryChanged(false, qty(13439, 20));
+		// 30 + 5 + 20 = 55 held -> 20 gained.
+		assertEquals(20, state.progressFor(goal(r, 1)).getCurrent());
+
+		// Deposit the 20 into the hold: the hold snapshot (25) replaces the
+		// server's 5 and the inventory empties. Still 20 gained.
+		state.onContainerSnapshot("boat_cargo_hold_1", qty(13439, 25));
+		state.onInventoryChanged(false, new HashMap<>());
+		assertEquals(20, state.progressFor(goal(r, 1)).getCurrent());
+
+		// A second boat the server has never seen simply adds.
+		state.onContainerSnapshot("boat_cargo_hold_2", qty(13439, 10));
+		assertEquals(30, state.progressFor(goal(r, 1)).getCurrent());
+
+		// Fish straight into the hold: progress rises without touching the inventory.
+		state.onContainerSnapshot("boat_cargo_hold_1", qty(13439, 105));
+		assertEquals(110, state.progressFor(goal(r, 1)).getCurrent());
+		state.settleOwned();
+		assertTrue(state.progressFor(goal(r, 1)).isComplete());
+		assertEquals(1, hooks.bankSyncs);
+	}
+
+	@Test
+	public void ownedItemGoalClientOnlySourceAddsToServerHoldings() {
+		Roadmap r = roadmap(1, goalJson(1, "item_owned", 0, 10, false,
+				"{\"item_id\":13439,\"start_qty\":0,\"held_bank\":0,\"held_vaults\":0,\"held_by_source\":{\"bank\":0}}"));
+		state.onServerRoadmap(r);
+		state.onInventoryChanged(false, new HashMap<>());
+		// The fish barrel ledger is inferred client-side; the server has no row for it yet.
+		state.onContainerSnapshot("fish_barrel", qty(13439, 7));
+		assertEquals(7, state.progressFor(goal(r, 1)).getCurrent());
+		state.onContainerSnapshot("fish_barrel", qty(13439, 10));
+		state.settleOwned();
+		assertTrue(state.progressFor(goal(r, 1)).isComplete());
+	}
+
+	@Test
+	public void ownedItemLocalSnapshotsSurviveServerRoadmapReads() {
+		Roadmap r = roadmap(1, goalJson(1, "item_owned", 0, 100, false,
+				"{\"item_id\":1511,\"start_qty\":30,\"held_bank\":30,\"held_vaults\":0,\"held_by_source\":{\"bank\":30}}"));
+		state.onServerRoadmap(r);
+		state.onInventoryChanged(false, new HashMap<>());
+		state.onBankSnapshot(qty(1511, 80));
+		assertEquals(50, state.progressFor(goal(r, 1)).getCurrent());
+		// A roadmap read that predates the (debounced) bank upload still says 30
+		// banked; the session snapshot is fresher and wins.
+		state.onServerRoadmap(r);
+		assertEquals(50, state.progressFor(goal(r, 1)).getCurrent());
+		// Logging out forgets the session's snapshots.
+		state.resetSession();
+		state.onInventoryChanged(false, new HashMap<>());
+		assertEquals(0, state.progressFor(goal(r, 1)).getCurrent());
+	}
+
+	@Test
+	public void ownedItemSameTickTransferDoesNotCompleteEarly() {
+		// 28 in the barrel, target 30 more: emptying the barrel into the bank
+		// arrives as bank +28 and barrel -> 0 in one tick, in either order.
+		Roadmap r = roadmap(1, goalJson(1, "item_owned", 0, 30, false,
+				"{\"item_id\":13439,\"start_qty\":0,\"held_bank\":0,\"held_vaults\":0,\"held_by_source\":{\"bank\":0}}"));
+		state.onServerRoadmap(r);
+		state.onInventoryChanged(false, new HashMap<>());
+		state.onContainerSnapshot("fish_barrel", qty(13439, 28));
+		state.settleOwned();
+		assertEquals(28, state.progressFor(goal(r, 1)).getCurrent());
+
+		state.onBankSnapshot(qty(13439, 28));
+		// Momentarily 56 held, but nothing is decided until the tick settles...
+		assertEquals(0, hooks.completedGoalIds.size());
+		state.onContainerSnapshot("fish_barrel", new HashMap<>());
+		state.settleOwned();
+		assertFalse(state.progressFor(goal(r, 1)).isComplete());
+		assertEquals(28, state.progressFor(goal(r, 1)).getCurrent());
+		assertEquals(0, hooks.bankSyncs);
+	}
+
+	@Test
+	public void ownedItemLegacyMetaWithoutBreakdownStillWorks() {
+		Roadmap r = roadmap(1, goalJson(1, "item_owned", 0, 10, false,
+				"{\"item_id\":4151,\"start_qty\":2,\"held_bank\":1,\"held_vaults\":1}"));
+		state.onServerRoadmap(r);
+		state.onInventoryChanged(false, qty(4151, 1));
+		// 1 bank + 1 vaults + 1 inventory = 3 -> 1 gained.
+		assertEquals(1, state.progressFor(goal(r, 1)).getCurrent());
+		state.onBankSnapshot(qty(4151, 5));
+		assertEquals(5, state.progressFor(goal(r, 1)).getCurrent());
 	}
 
 	@Test
