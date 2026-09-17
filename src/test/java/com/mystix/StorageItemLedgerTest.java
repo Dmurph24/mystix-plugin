@@ -250,4 +250,47 @@ public class StorageItemLedgerTest {
 		assertEquals("red topaz", StorageItemLedger.singular("Red topazes"));
 		assertEquals("opal", StorageItemLedger.singular("Opal"));
 	}
+
+	@Test
+	public void herbSackCountsPickupsAndPickedPatchesByName() {
+		StorageItemLedger l = ledger(StorageItemSpec.herbSack());
+		l.onGatherMessage("You put the Grimy ranarr weed herb into your herb sack.");
+		l.settle(true);
+		assertEquals(Integer.valueOf(1), l.contents().get(ItemID.UNIDENTIFIED_RANARR));
+		// Harvest: the patch clicked names the herb, the XP confirms it.
+		l.onPickTarget("<col=ffff>Herbs</col>");
+		l.onPickTarget("Ranarr weed");
+		l.onXp(Skill.FARMING, 31);
+		l.settle(true);
+		assertEquals(Integer.valueOf(2), l.contents().get(ItemID.UNIDENTIFIED_RANARR));
+	}
+
+	@Test
+	public void outsideStateResyncsExactly() {
+		StorageItemLedger l = ledger(StorageItemSpec.fishBarrel());
+		l.onGatherMessage("You catch an anglerfish!");
+		l.settle(true);
+		l.resync(qty(ItemID.RAW_SHARK, 9));
+		assertTrue(l.settle(false));
+		assertEquals(Integer.valueOf(9), l.contents().get(ItemID.RAW_SHARK));
+		assertNull(l.contents().get(ItemID.RAW_ANGLERFISH));
+		assertTrue(l.isKnown());
+		// Emptied to a deposit box with the item's own option.
+		assertTrue(l.onGameMessage("You empty the barrel."));
+		l.settle(false);
+		assertTrue(l.contents().isEmpty());
+	}
+
+	@Test
+	public void gemBagCountsThievingAndEmptiesForEveryVariant() {
+		StorageItemLedger l = ledger(StorageItemSpec.gemBag());
+		l.onGatherMessage("You steal an uncut sapphire and add it to your gem sack.");
+		l.onGatherMessage("You put the stolen Uncut ruby into your gem bag.");
+		l.settle(true);
+		assertEquals(Integer.valueOf(1), l.contents().get(ItemID.UNCUT_SAPPHIRE));
+		assertEquals(Integer.valueOf(1), l.contents().get(ItemID.UNCUT_RUBY));
+		assertTrue(l.onGameMessage("You empty the gem sack into the bank."));
+		l.settle(false);
+		assertTrue(l.contents().isEmpty());
+	}
 }

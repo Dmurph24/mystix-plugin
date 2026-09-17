@@ -52,6 +52,7 @@ final class StorageItemLedger {
 	private int xpGainedThisTick;
 	private Map<Integer, Integer> checkListing;
 	private boolean checkedEmpty;
+	private String lastPickTarget;
 
 	StorageItemLedger(StorageItemSpec spec, IntFunction<String> itemName) {
 		this(spec, itemName, Map::of);
@@ -110,18 +111,44 @@ final class StorageItemLedger {
 			}
 			return;
 		}
-		if (spec.gatherPattern == null) {
+		String text = clean(message);
+		for (Pattern pattern : spec.gatherPatterns) {
+			Matcher m = pattern.matcher(text);
+			if (!m.matches()) {
+				continue;
+			}
+			int itemId = itemIdForChatName(m.group(1));
+			if (itemId > 0) {
+				gatheredThisTick.merge(itemId, 1, Integer::sum);
+				lastGatheredItem = itemId;
+			}
 			return;
 		}
-		Matcher m = spec.gatherPattern.matcher(message);
-		if (!m.matches()) {
-			return;
+	}
+
+	/** Exact contents from an authoritative outside source (the Charges Improved plugin's state). */
+	void resync(Map<Integer, Integer> exact) {
+		ensureSeeded();
+		Map<Integer, Integer> next = new LinkedHashMap<>();
+		if (exact != null) {
+			exact.forEach((id, qty) -> {
+				if (spec.acceptedIds.contains(id) && qty != null && qty > 0) {
+					next.put(id, qty);
+				}
+			});
 		}
-		int itemId = itemIdForChatName(m.group(1));
-		if (itemId > 0) {
-			gatheredThisTick.merge(itemId, 1, Integer::sum);
-			lastGatheredItem = itemId;
+		if (!next.equals(contents)) {
+			contents.clear();
+			contents.putAll(next);
+			changed = true;
 		}
+		full = false;
+		known = true;
+	}
+
+	/** The target of the player's last "Pick" click (a herb patch): names the herb a Farming XP drop stores. */
+	void onPickTarget(String target) {
+		lastPickTarget = target == null ? null : clean(target).toLowerCase(Locale.ROOT);
 	}
 
 	/** A GAMEMESSAGE line while the container is carried. Returns true when it was about this container. */
@@ -261,6 +288,18 @@ final class StorageItemLedger {
 	private void creditXp() {
 		if (spec.xpCreditSkill == null || xpGainedThisTick <= 0 || inventoryChangedThisTick || full) {
 			return;
+		}
+		// The patch just clicked names the herb; the XP amount confirms it.
+		if (lastPickTarget != null) {
+			for (Map.Entry<Integer, Double> e : spec.xpPerItem.entrySet()) {
+				String name = chatNameIndex().entrySet().stream()
+						.filter(n -> n.getValue().equals(e.getKey())).map(Map.Entry::getKey).findFirst().orElse(null);
+				if (name != null && lastPickTarget.contains(name.split(" ")[0])
+						&& Math.abs(xpGainedThisTick - e.getValue()) <= 1.0) {
+					add(e.getKey(), 1);
+					return;
+				}
+			}
 		}
 		// Whole-number XP drops of a fractional value alternate around it.
 		for (Map.Entry<Integer, Double> e : spec.xpPerItem.entrySet()) {
