@@ -67,6 +67,8 @@ public class LootMonitor
 	/** Caches NPC name -> NPC ID from NpcLootReceived events (fires before LootReceived). */
 	private final Map<String, Integer> recentNpcIds = new LinkedHashMap<>();
 	private ScheduledFuture<?> flushTask;
+	/** Uploads a notable drop right away instead of waiting for the next timed flush. */
+	private final NotableLootFlusher notableFlusher;
 	/** MD5 hash of the last successfully synced loot data, used to skip redundant syncs. */
 	private String lastSyncHash;
 
@@ -89,6 +91,7 @@ public class LootMonitor
 		this.configManager = configManager;
 		this.itemManager = itemManager;
 		this.gson = gson;
+		this.notableFlusher = new NotableLootFlusher(executorService, this::flushDrops);
 	}
 
 	public void start()
@@ -151,6 +154,7 @@ public class LootMonitor
 			flushTask.cancel(false);
 			flushTask = null;
 		}
+		notableFlusher.cancel();
 		flushDrops();
 		previousGameState = GameState.UNKNOWN;
 		sessionKillCounts.clear();
@@ -272,10 +276,12 @@ public class LootMonitor
 		int npcId = resolveNpcIdFromEvent(event);
 
 		List<LootSyncPayload.LootItem> items = new ArrayList<>();
+		boolean notable = false;
 		for (ItemStack itemStack : event.getItems())
 		{
 			int itemId = canonicalizeItemId(itemStack.getId());
 			items.add(new LootSyncPayload.LootItem(itemId, itemStack.getQuantity()));
+			notable = notable || isNotable(itemId, itemStack.getQuantity());
 		}
 
 		if (items.isEmpty())
@@ -296,6 +302,17 @@ public class LootMonitor
 		{
 			listener.onDrop(npcId, npcName, event.getAmount(), items);
 		}
+		if (notable)
+		{
+			notableFlusher.request();
+		}
+	}
+
+	private boolean isNotable(int itemId, int quantity)
+	{
+		ItemComposition comp = itemManager.getItemComposition(itemId);
+		boolean tradeable = comp == null || comp.isTradeable();
+		return NotableLootFlusher.isNotable(itemId, quantity, itemManager.getItemPrice(itemId), tradeable);
 	}
 
 	/**
