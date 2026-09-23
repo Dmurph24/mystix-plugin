@@ -13,16 +13,19 @@ import javax.inject.Inject;
 import javax.inject.Singleton;
 import lombok.extern.slf4j.Slf4j;
 import net.runelite.client.util.ImageUtil;
+import okhttp3.HttpUrl;
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
 import okhttp3.Response;
 
 /**
- * In-memory cache of goal artwork the server links to (wiki images for bosses,
- * combat tasks and the like), scaled to overlay icon size. Images are fetched
- * once per URL on the background executor; until one arrives {@link #get}
- * returns null and the overlay simply draws no icon. Failed URLs are not
- * retried for the rest of the session.
+ * In-memory cache of goal artwork (OSRS Wiki images for bosses, combat tasks
+ * and the like), scaled to overlay icon size. Only images on the hardcoded
+ * {@link #WIKI_HOST} are fetched; any other URL the server sends is ignored,
+ * so the plugin never contacts a host taken from a server response. Images are
+ * fetched once per URL on the background executor; until one arrives
+ * {@link #get} returns null and the overlay simply draws no icon. Failed URLs
+ * are not retried for the rest of the session.
  */
 @Slf4j
 @Singleton
@@ -30,6 +33,9 @@ public class GoalImageCache {
 	/** Icons are scaled to fit this square, matching RuneLite's item sprites. */
 	static final int ICON_SIZE = 32;
 	private static final int FETCH_TIMEOUT_SECONDS = 10;
+	/** The only host goal images are fetched from. */
+	static final String WIKI_HOST = "oldschool.runescape.wiki";
+	private static final String WIKI_IMAGE_PATH = "/images/";
 
 	private final OkHttpClient httpClient;
 	private final ScheduledExecutorService executorService;
@@ -51,7 +57,7 @@ public class GoalImageCache {
 	 * it (once) and returns null. Safe to call every render frame.
 	 */
 	public BufferedImage get(String url) {
-		if (url == null || !url.startsWith("https://")) {
+		if (!isAllowed(url)) {
 			return null;
 		}
 		BufferedImage cached = images.get(url);
@@ -62,6 +68,16 @@ public class GoalImageCache {
 			executorService.execute(() -> fetch(url));
 		}
 		return null;
+	}
+
+	/** True when the URL is an https image on the OSRS Wiki. */
+	static boolean isAllowed(String url) {
+		HttpUrl parsed = url == null ? null : HttpUrl.parse(url);
+		return parsed != null
+				&& parsed.isHttps()
+				&& WIKI_HOST.equals(parsed.host())
+				&& parsed.port() == 443
+				&& parsed.encodedPath().startsWith(WIKI_IMAGE_PATH);
 	}
 
 	public void clear() {
