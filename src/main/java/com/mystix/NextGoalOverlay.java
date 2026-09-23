@@ -232,7 +232,7 @@ public class NextGoalOverlay extends OverlayPanel {
 		return lines;
 	}
 
-	/** The goal's icon: an item sprite, a skill icon, the server's artwork (bosses,
+	/** The goal's icon: an item sprite, a skill icon, the goal's wiki artwork (bosses,
 	 * combat tasks) once it has loaded, or null when none is available. */
 	private BufferedImage iconFor(RoadmapGoal goal) {
 		Integer itemId = goal.getItemId();
