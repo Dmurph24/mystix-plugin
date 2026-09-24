@@ -41,13 +41,13 @@ class NotableLootFlusher
 	 * single untradeable item (pets, collection log uniques). Untradeable stacks such as
 	 * currencies and shards drop constantly and are not notable.
 	 */
-	static boolean isNotable(int itemId, int quantity, int unitPrice, boolean tradeable)
+	static boolean isNotable(int itemId, int quantity, long unitPrice, boolean tradeable)
 	{
 		if (quantity <= 0 || itemId == ItemID.COINS)
 		{
 			return false;
 		}
-		if ((long) unitPrice * quantity >= NOTABLE_STACK_VALUE)
+		if (unitPrice * quantity >= NOTABLE_STACK_VALUE)
 		{
 			return true;
 		}
