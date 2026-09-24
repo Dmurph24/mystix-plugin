@@ -329,10 +329,44 @@ public class GoalProgressStateTest {
 
 	@Test
 	public void sourceSyncedRequestsOneReconcileOnlyWithRoadmap() {
-		state.onSourceSynced();
+		state.onSourceSynced(SyncSource.QUESTS);
 		assertTrue(hooks.reconcileDelays.isEmpty());
 		state.onServerRoadmap(roadmap(1, goalJson(1, "quest", 0, 0, false, null)));
-		state.onSourceSynced();
+		state.onSourceSynced(SyncSource.QUESTS);
+		assertEquals(Collections.singletonList(GoalProgressState.RECONCILE_LAG_SECONDS), hooks.reconcileDelays);
+	}
+
+	@Test
+	public void sourceSyncedSkipsUploadsThatCannotMoveAnyGoal() {
+		state.onServerRoadmap(roadmap(1,
+				goalJson(1, "quest", 0, 0, false, null),
+				goalJson(2, "skill_level", 10, 99, false, null)));
+		state.onSourceSynced(SyncSource.BANK);
+		state.onSourceSynced(SyncSource.LOOT);
+		state.onSourceSynced(SyncSource.TIMERS);
+		assertTrue(hooks.reconcileDelays.isEmpty());
+	}
+
+	@Test
+	public void sourceSyncedIgnoresGoalsTheServerAlreadyCompleted() {
+		state.onServerRoadmap(roadmap(1, goalJson(1, "item_owned", 5, 5, true, null)));
+		state.onSourceSynced(SyncSource.BANK);
+		assertTrue(hooks.reconcileDelays.isEmpty());
+	}
+
+	@Test
+	public void sourceSyncedRereadsForAMatchingOpenGoal() {
+		state.onServerRoadmap(roadmap(1,
+				goalJson(1, "quest", 0, 0, true, null),
+				goalJson(2, "net_worth", 0, 100, false, null)));
+		state.onSourceSynced(SyncSource.BANK);
+		assertEquals(Collections.singletonList(GoalProgressState.RECONCILE_LAG_SECONDS), hooks.reconcileDelays);
+	}
+
+	@Test
+	public void sourceSyncedRereadsForGoalTypesThisVersionDoesNotKnow() {
+		state.onServerRoadmap(roadmap(1, goalJson(1, "some_future_type", 0, 0, false, null)));
+		state.onSourceSynced(SyncSource.TIMERS);
 		assertEquals(Collections.singletonList(GoalProgressState.RECONCILE_LAG_SECONDS), hooks.reconcileDelays);
 	}
 
