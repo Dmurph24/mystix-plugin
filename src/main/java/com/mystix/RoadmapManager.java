@@ -44,6 +44,7 @@ public class RoadmapManager {
 	private final MystixApiClient apiClient;
 	private final ConfigManager configManager;
 	private final ReconcileScheduler scheduler;
+	private final RoadmapListCache listCache = new RoadmapListCache();
 
 	private volatile Roadmap currentRoadmap;
 	/** Hears every fetched roadmap, selected or not; set by the plugin. */
@@ -88,6 +89,7 @@ public class RoadmapManager {
 
 	void clear() {
 		setCurrentRoadmap(null);
+		listCache.invalidate();
 	}
 
 	public void setRoadmapListener(Consumer<Roadmap> listener) {
@@ -199,6 +201,7 @@ public class RoadmapManager {
 	 */
 	private void onRoadmapListFetched(RoadmapList list, String player, Runnable onDone) {
 		List<RoadmapSummary> summaries = list.getRoadmaps();
+		listCache.record(player, summaries, System.currentTimeMillis());
 		Set<Integer> ids = new HashSet<>();
 		for (RoadmapSummary summary : summaries) {
 			ids.add(summary.getCollectionId());
@@ -210,6 +213,13 @@ public class RoadmapManager {
 		if (getSelectedRoadmapId() == null && !summaries.isEmpty()) {
 			setSelectedRoadmapId(summaries.get(0).getCollectionId());
 		}
+		fetchEach(summaries, player, onDone);
+	}
+
+	/** Fetches each roadmap and feeds it to the tracker; {@code onDone} runs once
+	 * all have finished. A failed read drops the cached list (the roadmap may be
+	 * gone), so the next refresh fetches the list again. */
+	private void fetchEach(List<RoadmapSummary> summaries, String player, Runnable onDone) {
 		if (summaries.isEmpty()) {
 			if (onDone != null) {
 				onDone.run();
@@ -228,6 +238,7 @@ public class RoadmapManager {
 				@Override
 				public void onError(String message) {
 					log.debug("Roadmap {} refresh failed: {}", summary.getCollectionId(), message);
+					listCache.invalidate();
 					finish();
 				}
 
@@ -299,15 +310,16 @@ public class RoadmapManager {
 		notifyPanel(); // so server-driven goals can show their syncing state
 	}
 
-	/** True while a server re-read is scheduled or running (drives "Syncing" hints). */
+	/** True while a server re-read is running or about to (drives "Syncing" hints). */
 	public boolean isSyncing() {
-		return scheduler.isBusy();
+		return scheduler.isSyncingSoon();
 	}
 
 	/**
-	 * Refreshes every roadmap silently (no UI callback): the list, then each
-	 * roadmap's rendered goals. Runs on login, on the periodic schedule and after
-	 * uploads, so goal progress in any roadmap reaches the plugin even when the
+	 * Refreshes every roadmap silently (no UI callback): the list (reused while
+	 * recent, see {@link RoadmapListCache}), then each roadmap's rendered goals.
+	 * Runs on login, on the periodic schedule and after uploads that can move a
+	 * goal, so goal progress in any roadmap reaches the plugin even when the
 	 * panel is closed. A plain GET re-evaluates goals server-side, so no
 	 * recompute call is needed.
 	 */
@@ -327,13 +339,19 @@ public class RoadmapManager {
 			return;
 		}
 		notifyPanel();
+		Runnable done = () -> {
+			scheduler.clearInFlight();
+			notifyPanel();
+		};
+		List<RoadmapSummary> known = listCache.reusable(player, System.currentTimeMillis());
+		if (known != null) {
+			fetchEach(known, player, done);
+			return;
+		}
 		apiClient.getRoadmaps(player, new MystixApiClient.RoadmapCallback<RoadmapList>() {
 			@Override
 			public void onSuccess(RoadmapList result) {
-				onRoadmapListFetched(result, player, () -> {
-					scheduler.clearInFlight();
-					notifyPanel();
-				});
+				onRoadmapListFetched(result, player, done);
 			}
 
 			@Override

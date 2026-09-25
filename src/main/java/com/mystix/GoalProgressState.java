@@ -594,10 +594,14 @@ final class GoalProgressState {
 		}
 	}
 
-	/** Some monitor just uploaded data the server evaluates goals against. */
-	synchronized void onSourceSynced() {
-		if (!roadmaps.isEmpty()) {
-			hooks.requestReconcile(RECONCILE_LAG_SECONDS);
+	/** A monitor just uploaded data the server evaluates goals against. Re-read
+	 * only when an unfinished goal can be moved by it. */
+	synchronized void onSourceSynced(SyncSource source) {
+		for (LocalGoal lg : goals.values()) {
+			if (!lg.serverComplete && source.affects(lg.type)) {
+				hooks.requestReconcile(RECONCILE_LAG_SECONDS);
+				return;
+			}
 		}
 	}
 

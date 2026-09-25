@@ -233,8 +233,8 @@ public class GoalProgressTracker implements GoalProgressState.SyncHooks {
 		state.onCollectionLogItemObtained(itemId, quantity);
 	}
 
-	public void onSourceSynced() {
-		state.onSourceSynced();
+	public void onSourceSynced(SyncSource source) {
+		state.onSourceSynced(source);
 	}
 
 	public void onQuestStates(Map<String, Integer> statusByQuestName) {
