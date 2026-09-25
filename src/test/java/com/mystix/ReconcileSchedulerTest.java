@@ -120,4 +120,29 @@ public class ReconcileSchedulerTest {
 		executor.runDue(TimeUnit.SECONDS.toMillis(1));
 		assertEquals(2, refreshes);
 	}
+
+	@Test
+	public void syncingHintOnlyWhenTheReadIsClose() {
+		scheduler.request(10);
+		assertTrue(scheduler.isSyncingSoon());
+		executor.runDue(TimeUnit.SECONDS.toMillis(10));
+
+		// Held back by the minimum interval: due at 70 s, so no hint yet at 20 s.
+		executor.runDue(TimeUnit.SECONDS.toMillis(20));
+		scheduler.request(10);
+		assertTrue(scheduler.isBusy());
+		assertFalse(scheduler.isSyncingSoon());
+
+		executor.runDue(TimeUnit.SECONDS.toMillis(70 - ReconcileScheduler.SYNCING_HINT_SECONDS));
+		assertTrue(scheduler.isSyncingSoon());
+	}
+
+	@Test
+	public void syncingHintWhileInFlight() {
+		assertFalse(scheduler.isSyncingSoon());
+		assertTrue(scheduler.markInFlight());
+		assertTrue(scheduler.isSyncingSoon());
+		scheduler.clearInFlight();
+		assertFalse(scheduler.isSyncingSoon());
+	}
 }

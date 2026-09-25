@@ -19,6 +19,8 @@ final class ReconcileScheduler {
 	static final int PERIODIC_MINUTES = 10;
 	static final int RETRY_WHEN_BUSY_SECONDS = 5;
 	static final int MIN_INTERVAL_SECONDS = 60;
+	/** A pending read closer than this counts as "syncing" for the UI hint. */
+	static final int SYNCING_HINT_SECONDS = 15;
 
 	private final ScheduledExecutorService executor;
 	private final Runnable refresh;
@@ -29,6 +31,7 @@ final class ReconcileScheduler {
 	private ScheduledFuture<?> pending;
 	private boolean busyRetryUsed;
 	private long lastFireMs = Long.MIN_VALUE;
+	private long pendingDueMs;
 
 	ReconcileScheduler(ScheduledExecutorService executor, Runnable refresh) {
 		this(executor, refresh, System::currentTimeMillis);
@@ -51,6 +54,7 @@ final class ReconcileScheduler {
 			long earliestMs = lastFireMs + TimeUnit.SECONDS.toMillis(MIN_INTERVAL_SECONDS);
 			delayMs = Math.max(delayMs, earliestMs - clockMs.getAsLong());
 		}
+		pendingDueMs = clockMs.getAsLong() + delayMs;
 		pending = executor.schedule(this::firePending, delayMs, TimeUnit.MILLISECONDS);
 	}
 
@@ -79,6 +83,17 @@ final class ReconcileScheduler {
 	/** True while a re-read is scheduled or running. */
 	synchronized boolean isBusy() {
 		return pending != null || inFlight.get();
+	}
+
+	/** True while a re-read is running or due within {@link #SYNCING_HINT_SECONDS}.
+	 * Drives the "Syncing" hint: a read held back by the minimum interval
+	 * would otherwise show it for up to a minute. */
+	synchronized boolean isSyncingSoon() {
+		if (inFlight.get()) {
+			return true;
+		}
+		return pending != null
+				&& pendingDueMs - clockMs.getAsLong() <= TimeUnit.SECONDS.toMillis(SYNCING_HINT_SECONDS);
 	}
 
 	/** Claims the in-flight slot; false when a read is already running. */

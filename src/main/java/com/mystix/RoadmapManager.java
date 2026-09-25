@@ -310,9 +310,9 @@ public class RoadmapManager {
 		notifyPanel(); // so server-driven goals can show their syncing state
 	}
 
-	/** True while a server re-read is scheduled or running (drives "Syncing" hints). */
+	/** True while a server re-read is running or about to (drives "Syncing" hints). */
 	public boolean isSyncing() {
-		return scheduler.isBusy();
+		return scheduler.isSyncingSoon();
 	}
 
 	/**
