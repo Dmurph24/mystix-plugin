@@ -86,3 +86,7 @@ If you use a Jagex account and can't log in when running from the IDE, you need 
 2. Add `--insecure-write-credentials` to **Client arguments**
 3. Save, then launch RuneLite via the Jagex launcher once so it writes credentials to `~/.runelite/credentials.properties`
 4. After that, running from the IDE will use the saved credentials
+
+## Releasing to the Plugin Hub
+
+A Plugin Hub update points `plugins/mystix` in `runelite/plugin-hub` at a commit of this repo. Before opening that PR, bump `MystixApiClient.PLUGIN_VERSION` (a date, `YYYY.MM.DD`, with a `.N` suffix for a second release the same day) in the commit it will point at. Every request to Mystix carries it as `X-Mystix-Plugin-Version`, which is how the server tells releases apart; Plugin Hub builds carry no version of their own.

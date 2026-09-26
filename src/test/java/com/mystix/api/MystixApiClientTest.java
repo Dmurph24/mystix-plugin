@@ -13,9 +13,15 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import okhttp3.OkHttpClient;
+import okhttp3.Protocol;
+import okhttp3.Request;
+import okhttp3.Response;
+import okhttp3.ResponseBody;
 import org.junit.Test;
 
 import static org.junit.Assert.assertEquals;
@@ -167,5 +173,50 @@ public class MystixApiClientTest {
 		client.sendTimersSync(Collections.singletonList(item));
 		client.sendTimersSync(Collections.singletonList(item));
 		// Should not throw; with empty key both return early before the dedupe check
+	}
+
+	/** A base client that answers every call itself and records what it was sent. */
+	private static OkHttpClient recordingClient(AtomicReference<Request> sent, CountDownLatch done) {
+		return new OkHttpClient.Builder()
+				.addInterceptor(chain -> {
+					sent.set(chain.request());
+					done.countDown();
+					return new Response.Builder()
+							.request(chain.request())
+							.protocol(Protocol.HTTP_1_1)
+							.code(200)
+							.message("OK")
+							.body(ResponseBody.create(null, "{\"roadmaps\":[]}"))
+							.build();
+				})
+				.build();
+	}
+
+	@Test
+	public void everyRequestCarriesThePluginVersion() throws InterruptedException {
+		com.mystix.TestMystixConfig config = new com.mystix.TestMystixConfig();
+		config.setMystixAppKey("test-key");
+		AtomicReference<Request> sent = new AtomicReference<>();
+		CountDownLatch done = new CountDownLatch(1);
+		MystixApiClient client = new MystixApiClient(config, new Gson(), recordingClient(sent, done));
+
+		client.getRoadmaps("Zezima", new MystixApiClient.RoadmapCallback<RoadmapList>() {
+			@Override
+			public void onSuccess(RoadmapList result) {
+			}
+
+			@Override
+			public void onError(String message) {
+			}
+		});
+
+		assertTrue(done.await(5, TimeUnit.SECONDS));
+		assertEquals(MystixApiClient.PLUGIN_VERSION, sent.get().header(MystixApiClient.VERSION_HEADER));
+		assertEquals("test-key", sent.get().header("X-RuneLite-Key"));
+	}
+
+	@Test
+	public void pluginVersionIsHeaderSafe() {
+		assertTrue(MystixApiClient.PLUGIN_VERSION.matches("[0-9A-Za-z._-]{1,32}"));
 	}
 }
