@@ -38,6 +38,7 @@ import javax.inject.Singleton;
 import lombok.extern.slf4j.Slf4j;
 import okhttp3.Call;
 import okhttp3.Callback;
+import okhttp3.Interceptor;
 import okhttp3.MediaType;
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
@@ -52,6 +53,16 @@ public class MystixApiClient
 	private static final long LARGE_REQUEST_TIMEOUT_SECONDS = 60;
 	private static final MediaType JSON_MEDIA_TYPE = MediaType.parse("application/json");
 	private static final String API_BASE_URL = "https://api.mystix.app";
+
+	/**
+	 * This release, sent with every Mystix request so the server can tell plugin
+	 * releases apart (Plugin Hub builds carry no version of their own). Bump it
+	 * in the commit a Plugin Hub update points at.
+	 */
+	public static final String PLUGIN_VERSION = "2026.09.27";
+	static final String VERSION_HEADER = "X-Mystix-Plugin-Version";
+	private static final Interceptor VERSION_INTERCEPTOR = chain -> chain.proceed(
+		chain.request().newBuilder().header(VERSION_HEADER, PLUGIN_VERSION).build());
 	private static final String TIMERS_ENDPOINT = "/api/runelite/timers/";
 	private static final String SKILLS_ENDPOINT = "/api/runelite/skills/";
 	private static final String BANK_ENDPOINT = "/api/runelite/bank/";
@@ -88,13 +99,21 @@ public class MystixApiClient
 	{
 		this.config = config;
 		this.gson = gson;
-		this.okHttpClient = okHttpClient.newBuilder()
+		this.okHttpClient = withVersionHeader(okHttpClient.newBuilder())
 			.callTimeout(REQUEST_TIMEOUT_SECONDS, TimeUnit.SECONDS)
 			.build();
-		this.largeRequestClient = okHttpClient.newBuilder()
+		this.largeRequestClient = withVersionHeader(okHttpClient.newBuilder())
 			.callTimeout(LARGE_REQUEST_TIMEOUT_SECONDS, TimeUnit.SECONDS)
 			.readTimeout(LARGE_REQUEST_TIMEOUT_SECONDS, TimeUnit.SECONDS)
 			.build();
+	}
+
+	/** Tags every request these clients send (first, so the client's own
+	 * interceptors see the header too). */
+	private static OkHttpClient.Builder withVersionHeader(OkHttpClient.Builder builder)
+	{
+		builder.interceptors().add(0, VERSION_INTERCEPTOR);
+		return builder;
 	}
 
 	public void sendTimersSync(List<TimerSyncItem> timers)
