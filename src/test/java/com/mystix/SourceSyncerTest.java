@@ -38,8 +38,8 @@ public class SourceSyncerTest {
 		syncer.setGoalItems(() -> goalItems);
 	}
 
-	private static Map<Integer, Integer> qty(int itemId, int q) {
-		Map<Integer, Integer> m = new HashMap<>();
+	private static Map<Integer, Long> qty(int itemId, long q) {
+		Map<Integer, Long> m = new HashMap<>();
 		m.put(itemId, q);
 		return m;
 	}
@@ -49,7 +49,7 @@ public class SourceSyncerTest {
 		executor.runDue(now);
 	}
 
-	private int quantity(BankSyncPayload p, String source, int itemId) {
+	private long quantity(BankSyncPayload p, String source, int itemId) {
 		for (BankSyncPayload.BankItem i : p.getItems().get(source)) {
 			if (i.getItemId() == itemId) {
 				return i.getQuantity();
@@ -81,11 +81,11 @@ public class SourceSyncerTest {
 		advance(GOAL_MS);
 		assertEquals(2, sent.size());
 		// A later non-goal change never pushes a running goal wait out.
-		Map<Integer, Integer> both = qty(13439, 3);
+		Map<Integer, Long> both = qty(13439, 3);
 		syncer.submit(both, false);
 		advance(GOAL_MS / 2);
-		Map<Integer, Integer> plusShark = new HashMap<>(both);
-		plusShark.put(383, 1);
+		Map<Integer, Long> plusShark = new HashMap<>(both);
+		plusShark.put(383, 1L);
 		syncer.submit(plusShark, false);
 		advance(GOAL_MS / 2);
 		assertEquals(3, sent.size());
@@ -127,23 +127,23 @@ public class SourceSyncerTest {
 	public void multipleSourcesMergeIntoOnePendingUpload() {
 		SourceSyncer bank = new SourceSyncer("bank memory", new Gson(), executor, () -> now, () -> enabled, () -> "Zezima", sent::add);
 		bank.setGoalItems(() -> goalItems);
-		Map<String, Map<Integer, Integer>> first = new HashMap<>();
+		Map<String, Map<Integer, Long>> first = new HashMap<>();
 		first.put("inventory", qty(1511, 5));
 		bank.submitSources(first, false);
 		assertEquals(1, sent.size());
 		// The bank opens later: a source never sent goes up at once, with the inventory as it is.
-		Map<String, Map<Integer, Integer>> withBank = new HashMap<>();
+		Map<String, Map<Integer, Long>> withBank = new HashMap<>();
 		withBank.put("bank", qty(1511, 100));
 		withBank.put("inventory", qty(1511, 5));
 		bank.submitSources(withBank, false);
 		assertEquals(2, sent.size());
 		assertEquals(100, quantity(sent.get(1), "bank", 1511));
 		// Routine changes to both sources collapse into one request.
-		Map<String, Map<Integer, Integer>> later = new HashMap<>();
+		Map<String, Map<Integer, Long>> later = new HashMap<>();
 		later.put("bank", qty(1511, 90));
 		later.put("inventory", qty(1511, 15));
 		bank.submitSources(later, false);
-		Map<String, Map<Integer, Integer>> invOnly = new HashMap<>();
+		Map<String, Map<Integer, Long>> invOnly = new HashMap<>();
 		invOnly.put("inventory", qty(1511, 16));
 		bank.submitSources(invOnly, false);
 		advance(DEFAULT_MS);
@@ -162,5 +162,22 @@ public class SourceSyncerTest {
 		syncer.submit(qty(13439, 9), true);
 		assertEquals(2, sent.size());
 		assertFalse(enabled);
+	}
+
+	@Test
+	public void quantitiesPastMaxCashUploadAndDedupe() {
+		SourceSyncer bank = new SourceSyncer("bank memory", new Gson(), executor, () -> now, () -> enabled, () -> "Zezima", sent::add);
+		Map<String, Map<Integer, Long>> sources = new HashMap<>();
+		sources.put("bank", qty(995, 5_000_000_000L));
+		bank.submitSources(sources, false);
+		assertEquals(1, sent.size());
+		assertEquals(5_000_000_000L, quantity(sent.get(0), "bank", 995));
+		assertTrue(sent.get(0).toJson(new Gson()).contains("\"quantity\":5000000000"));
+		// The same 5B again is a no-op; one more coin is a change.
+		bank.submitSources(sources, true);
+		assertEquals(1, sent.size());
+		sources.put("bank", qty(995, 5_000_000_001L));
+		bank.submitSources(sources, true);
+		assertEquals(2, sent.size());
 	}
 }

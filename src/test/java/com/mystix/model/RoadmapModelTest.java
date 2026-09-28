@@ -118,4 +118,22 @@ public class RoadmapModelTest {
 		assertEquals("Guard", g.getNpcName());
 		assertNull(GSON.fromJson("{\"id\":1,\"meta\":{}}", RoadmapGoal.class).getNpcName());
 	}
+
+	@Test
+	public void goalQuantitiesPastIntRangeParse() {
+		// Net worth / owned-coins goals pass 2^31-1 once max cash is lifted; an
+		// int field made Gson reject the whole roadmap.
+		String json = "{\"collection_id\":1,\"title\":\"T\",\"goals\":[{\"id\":7,\"goal_type\":\"item_owned\","
+				+ "\"current\":5000000000,\"target\":10000000000,\"progress_percent\":50,\"is_complete\":false,"
+				+ "\"meta\":{\"item_id\":995,\"start_qty\":3000000000,\"held_bank\":4294967294,"
+				+ "\"held_vaults\":2147483648,\"held_by_source\":{\"bank\":4294967294}}}]}";
+		Roadmap roadmap = new Gson().fromJson(json, Roadmap.class);
+		RoadmapGoal goal = roadmap.getGoals().get(0);
+		assertEquals(5_000_000_000L, goal.getCurrent());
+		assertEquals(10_000_000_000L, goal.getTarget());
+		assertEquals(Long.valueOf(3_000_000_000L), goal.getStartQty());
+		assertEquals(Long.valueOf(4_294_967_294L), goal.getHeldBank());
+		assertEquals(Long.valueOf(2_147_483_648L), goal.getHeldVaults());
+		assertEquals(Long.valueOf(4_294_967_294L), goal.getHeldBySource().get("bank"));
+	}
 }

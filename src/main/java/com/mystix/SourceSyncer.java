@@ -57,8 +57,8 @@ final class SourceSyncer {
 	private volatile Runnable onSent;
 
 	/** Contents last uploaded this session, per source. A source absent here was never sent. */
-	private final Map<String, Map<Integer, Integer>> sentBySource = new HashMap<>();
-	private final Map<String, Map<Integer, Integer>> pendingBySource = new LinkedHashMap<>();
+	private final Map<String, Map<Integer, Long>> sentBySource = new HashMap<>();
+	private final Map<String, Map<Integer, Long>> pendingBySource = new LinkedHashMap<>();
 	private String pendingUsername;
 	private ScheduledFuture<?> pendingSync;
 	private long pendingDueMs;
@@ -99,8 +99,8 @@ final class SourceSyncer {
 	}
 
 	/** New contents for the syncer's single source (its label). */
-	void submit(Map<Integer, Integer> quantities, boolean immediate) {
-		Map<String, Map<Integer, Integer>> bySource = new LinkedHashMap<>();
+	void submit(Map<Integer, Long> quantities, boolean immediate) {
+		Map<String, Map<Integer, Long>> bySource = new LinkedHashMap<>();
 		bySource.put(label, quantities == null ? Map.of() : quantities);
 		submitSources(bySource, immediate);
 	}
@@ -109,7 +109,7 @@ final class SourceSyncer {
 	 * New contents for one or more sources (canonical item id to quantity).
 	 * Uploaded after the debounce, or right away when {@code immediate}.
 	 */
-	synchronized void submitSources(Map<String, Map<Integer, Integer>> bySource, boolean immediate) {
+	synchronized void submitSources(Map<String, Map<Integer, Long>> bySource, boolean immediate) {
 		if (bySource == null || bySource.isEmpty() || !syncEnabled.getAsBoolean()) {
 			return;
 		}
@@ -122,12 +122,12 @@ final class SourceSyncer {
 		boolean goalRelevant = false;
 		boolean anyChange = false;
 		Set<Integer> goals = goalItems.get();
-		for (Map.Entry<String, Map<Integer, Integer>> e : bySource.entrySet()) {
+		for (Map.Entry<String, Map<Integer, Long>> e : bySource.entrySet()) {
 			String source = e.getKey();
-			Map<Integer, Integer> contents = new LinkedHashMap<>(e.getValue());
-			Map<Integer, Integer> baseline = pendingBySource.containsKey(source)
+			Map<Integer, Long> contents = new LinkedHashMap<>(e.getValue());
+			Map<Integer, Long> baseline = pendingBySource.containsKey(source)
 					? pendingBySource.get(source) : sentBySource.get(source);
-			Map<Integer, Integer> sent = sentBySource.get(source);
+			Map<Integer, Long> sent = sentBySource.get(source);
 			if (sent != null && sent.equals(contents)) {
 				pendingBySource.remove(source); // back to what the server has
 				continue;
@@ -175,7 +175,7 @@ final class SourceSyncer {
 			return;
 		}
 		Map<String, List<BankSyncPayload.BankItem>> itemsBySource = new LinkedHashMap<>();
-		for (Map.Entry<String, Map<Integer, Integer>> e : pendingBySource.entrySet()) {
+		for (Map.Entry<String, Map<Integer, Long>> e : pendingBySource.entrySet()) {
 			itemsBySource.put(e.getKey(), ItemCollector.toBankItemList(e.getValue()));
 			sentBySource.put(e.getKey(), e.getValue());
 		}
@@ -200,14 +200,14 @@ final class SourceSyncer {
 		sentBySource.clear();
 	}
 
-	private static boolean touchesGoalItem(Map<Integer, Integer> before, Map<Integer, Integer> after, Set<Integer> goals) {
+	private static boolean touchesGoalItem(Map<Integer, Long> before, Map<Integer, Long> after, Set<Integer> goals) {
 		if (goals == null || goals.isEmpty()) {
 			return false;
 		}
 		Set<Integer> ids = new HashSet<>(before.keySet());
 		ids.addAll(after.keySet());
 		for (int id : ids) {
-			if (goals.contains(id) && !before.getOrDefault(id, 0).equals(after.getOrDefault(id, 0))) {
+			if (goals.contains(id) && !before.getOrDefault(id, 0L).equals(after.getOrDefault(id, 0L))) {
 				return true;
 			}
 		}

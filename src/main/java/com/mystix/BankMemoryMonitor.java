@@ -49,11 +49,11 @@ public class BankMemoryMonitor {
 	/** Deposits made where the bank container is never sent (deposit box, bank boat). */
 	private final BankDepositLedger deposits;
 	/** Source to what the server last held for the goal items in it; set by the plugin. */
-	private volatile Function<String, Map<Integer, Integer>> seedSupplier;
+	private volatile Function<String, Map<Integer, Long>> seedSupplier;
 
 	private GameState previousGameState = GameState.UNKNOWN;
 	/** Inventory + gear as last read, for deposit diffs. */
-	private Map<Integer, Integer> lastCarried = new LinkedHashMap<>();
+	private Map<Integer, Long> lastCarried = new LinkedHashMap<>();
 
 	@Inject
 	public BankMemoryMonitor(
@@ -72,18 +72,18 @@ public class BankMemoryMonitor {
 				() -> SyncGuard.getPlayerUsername(client),
 				apiClient::sendBankSync);
 		this.deposits = new BankDepositLedger(() -> {
-			Function<String, Map<Integer, Integer>> s = seedSupplier;
+			Function<String, Map<Integer, Long>> s = seedSupplier;
 			return s == null ? Map.of() : s.apply(BankDepositLedger.SOURCE);
 		});
 	}
 
-	public void setSeedSupplier(Function<String, Map<Integer, Integer>> supplier) {
+	public void setSeedSupplier(Function<String, Map<Integer, Long>> supplier) {
 		this.seedSupplier = supplier;
 	}
 
 	/** Items reached the bank without a bank container being sent (a storage item emptied into a
 	 * deposit box, a crew member banking the hold): count them as deposited and push. */
-	public void onItemsBankedUnseen(Map<Integer, Integer> contents) {
+	public void onItemsBankedUnseen(Map<Integer, Long> contents) {
 		deposits.onContainerEmptied(contents);
 		clientThread.invokeLater(() -> push(true, false));
 	}
@@ -182,7 +182,7 @@ public class BankMemoryMonitor {
 	 * @param immediate       skip the debounce
 	 */
 	private void push(boolean inventoryOnlyOk, boolean immediate) {
-		Map<String, Map<Integer, Integer>> bySource = readSources(inventoryOnlyOk);
+		Map<String, Map<Integer, Long>> bySource = readSources(inventoryOnlyOk);
 		if (bySource == null) {
 			return;
 		}
@@ -196,11 +196,11 @@ public class BankMemoryMonitor {
 	 * even though no bank container was sent. Once the bank proper is read it
 	 * holds everything, so the deposits go back to empty alongside it.
 	 */
-	private void trackDeposits(Map<String, Map<Integer, Integer>> bySource) {
-		Map<Integer, Integer> carried = bySource.get(SOURCE_INVENTORY);
-		Map<Integer, Integer> removed = new LinkedHashMap<>();
-		for (Map.Entry<Integer, Integer> e : lastCarried.entrySet()) {
-			int delta = e.getValue() - carried.getOrDefault(e.getKey(), 0);
+	private void trackDeposits(Map<String, Map<Integer, Long>> bySource) {
+		Map<Integer, Long> carried = bySource.get(SOURCE_INVENTORY);
+		Map<Integer, Long> removed = new LinkedHashMap<>();
+		for (Map.Entry<Integer, Long> e : lastCarried.entrySet()) {
+			long delta = e.getValue() - carried.getOrDefault(e.getKey(), 0L);
 			if (delta > 0) {
 				removed.put(e.getKey(), delta);
 			}
@@ -218,7 +218,7 @@ public class BankMemoryMonitor {
 		}
 	}
 
-	private Map<String, Map<Integer, Integer>> readSources(boolean inventoryOnlyOk) {
+	private Map<String, Map<Integer, Long>> readSources(boolean inventoryOnlyOk) {
 		if (GameModeUtil.isSpecialGameMode(client)) {
 			log.debug("Bank sync skipped: special game mode detected");
 			return null;
@@ -227,20 +227,20 @@ public class BankMemoryMonitor {
 		if (bankContainer == null && !inventoryOnlyOk) {
 			return null;
 		}
-		Map<String, Map<Integer, Integer>> bySource = new LinkedHashMap<>();
+		Map<String, Map<Integer, Long>> bySource = new LinkedHashMap<>();
 		if (bankContainer != null) {
-			Map<Integer, Integer> bankQuantities = new LinkedHashMap<>();
+			Map<Integer, Long> bankQuantities = new LinkedHashMap<>();
 			ItemCollector.collectBankItems(bankContainer, itemManager, bankQuantities);
 			bySource.put(SOURCE_BANK, bankQuantities);
 		}
-		Map<Integer, Integer> invQuantities = new LinkedHashMap<>();
+		Map<Integer, Long> invQuantities = new LinkedHashMap<>();
 		collectContainerItems(InventoryID.INV, invQuantities);
 		collectContainerItems(InventoryID.WORN, invQuantities);
 		bySource.put(SOURCE_INVENTORY, invQuantities);
 		return bySource;
 	}
 
-	private void notifyPayload(Map<String, Map<Integer, Integer>> bySource) {
+	private void notifyPayload(Map<String, Map<Integer, Long>> bySource) {
 		Consumer<BankSyncPayload> listener = payloadListener;
 		if (listener == null) {
 			return;
@@ -254,7 +254,7 @@ public class BankMemoryMonitor {
 		listener.accept(new BankSyncPayload(playerUsername, itemsBySource));
 	}
 
-	private void collectContainerItems(int containerId, Map<Integer, Integer> itemQuantities) {
+	private void collectContainerItems(int containerId, Map<Integer, Long> itemQuantities) {
 		ItemContainer container = client.getItemContainer(containerId);
 		if (container == null) {
 			return;

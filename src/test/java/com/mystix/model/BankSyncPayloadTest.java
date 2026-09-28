@@ -101,4 +101,21 @@ public class BankSyncPayloadTest {
 		assertTrue(json.contains("\"item_id\":995"));
 		assertTrue(json.contains("\"quantity\":2147483647"));
 	}
+
+	@Test
+	public void testQuantityPastMaxCashSerializesUnderTheSameFieldName() {
+		// OSRS lifted the 2,147,483,647 coin cap: coins + platinum tokens folded
+		// into one bank, or a single coin stack, can pass int range.
+		long coins = 5_000_000_000L;
+		Map<String, List<BankSyncPayload.BankItem>> itemsBySource = new LinkedHashMap<>();
+		itemsBySource.put("bank", Arrays.asList(
+				new BankSyncPayload.BankItem(995, coins),
+				new BankSyncPayload.BankItem(13204, Integer.MAX_VALUE)));
+		String json = new BankSyncPayload("Rich", itemsBySource).toJson(gson);
+
+		assertTrue(json.contains("\"item_id\":995,\"quantity\":5000000000"));
+		assertTrue(json.contains("\"item_id\":13204,\"quantity\":2147483647"));
+		BankSyncPayload back = gson.fromJson(json, BankSyncPayload.class);
+		assertEquals(coins, back.getItems().get("bank").get(0).getQuantity());
+	}
 }

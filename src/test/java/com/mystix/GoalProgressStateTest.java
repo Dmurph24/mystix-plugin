@@ -37,10 +37,10 @@ public class GoalProgressStateTest {
 
 	// ------------------------------------------------------------- helpers
 
-	private static String goalJson(int id, String type, int current, int target, boolean complete, String meta) {
+	private static String goalJson(int id, String type, long current, long target, boolean complete, String meta) {
 		Integer percent = null;
 		if (Arrays.asList("skill_level", "skill_xp", "kc", "item_quantity", "item_owned", "net_worth", "farming_timer").contains(type)) {
-			percent = target > 0 ? Math.min(100, current * 100 / target) : 0;
+			percent = target > 0 ? (int) Math.min(100, current * 100 / target) : 0;
 		}
 		return "{\"id\":" + id + ",\"goal_type\":\"" + type + "\",\"sort_order\":" + id
 				+ ",\"name\":\"Goal " + id + "\",\"current\":" + current + ",\"target\":" + target
@@ -552,8 +552,8 @@ public class GoalProgressStateTest {
 		assertTrue(v.isComplete());
 	}
 
-	private static Map<Integer, Integer> qty(int itemId, int q) {
-		Map<Integer, Integer> m = new HashMap<>();
+	private static Map<Integer, Long> qty(int itemId, long q) {
+		Map<Integer, Long> m = new HashMap<>();
 		m.put(itemId, q);
 		return m;
 	}
@@ -711,5 +711,83 @@ public class GoalProgressStateTest {
 		assertEquals(25, v.getCurrent());
 		assertEquals(Integer.valueOf(25), v.getPercent());
 		assertEquals(GoalType.ITEM_OWNED, v.getType());
+	}
+
+	// ------------------------------------------------------ max cash (> 2^31-1)
+
+	private static final long MAX_CASH = Integer.MAX_VALUE;
+	private static final int COINS = 995;
+
+	@Test
+	public void netWorthGoalAboveIntRangeParsesAndReportsProgress() {
+		// OSRS lifted the max-cash cap: the server sends gp values past 2^31-1.
+		// With int fields Gson rejected the whole roadmap response.
+		Roadmap r = roadmap(1, goalJson(1, "net_worth", 5_000_000_000L, 10_000_000_000L, false, null));
+		GoalProgressView v = state.progressFor(goal(r, 1));
+		assertEquals(5_000_000_000L, v.getCurrent());
+		assertEquals(10_000_000_000L, v.getTarget());
+		assertEquals(Integer.valueOf(50), v.getPercent());
+		state.onServerRoadmap(r);
+		v = state.progressFor(goal(r, 1));
+		assertEquals(5_000_000_000L, v.getCurrent());
+		assertEquals(10_000_000_000L, v.getTarget());
+	}
+
+	@Test
+	public void ownedCoinsGoalSumsMaxCashStacksAcrossSourcesWithoutOverflow() {
+		// Wants 3B more coins; started with none. Server already holds a max-cash
+		// stack in the bank and more in a deposit-box overlay.
+		Roadmap r = roadmap(1, goalJson(1, "item_owned", 0, 3_000_000_000L, false,
+				"{\"item_id\":" + COINS + ",\"start_qty\":0,\"held_bank\":" + MAX_CASH
+				+ ",\"held_vaults\":0,\"held_by_source\":{\"bank\":" + MAX_CASH
+				+ ",\"bank_deposits\":" + MAX_CASH + "}}"));
+		state.onServerRoadmap(r);
+		assertEquals(Long.valueOf(MAX_CASH), state.serverHeldFor("bank_deposits").get(COINS));
+
+		// A max-cash stack carried too: 3 x 2,147,483,647 = 6,442,450,941 held.
+		state.onInventoryChanged(false, qty(COINS, MAX_CASH));
+		GoalProgressView v = state.progressFor(goal(r, 1));
+		assertEquals(3 * MAX_CASH, v.getCurrent());
+		assertEquals(3_000_000_000L, v.getTarget());
+		assertEquals(Integer.valueOf(100), v.getPercent());
+		state.settleOwned();
+		assertTrue(state.progressFor(goal(r, 1)).isComplete());
+		assertEquals(Collections.singletonList(1), hooks.completedGoalIds);
+	}
+
+	@Test
+	public void ownedCoinsGoalBelowTargetStaysIncompleteNearIntBoundary() {
+		// 5B wanted: bank + inventory max-cash stacks (4,294,967,294) fall short.
+		// Summed as ints this wrapped negative.
+		Roadmap r = roadmap(1, goalJson(1, "item_owned", 0, 5_000_000_000L, false,
+				"{\"item_id\":" + COINS + ",\"start_qty\":0,\"held_bank\":0,\"held_vaults\":0,"
+				+ "\"held_by_source\":{\"bank\":0}}"));
+		state.onServerRoadmap(r);
+		state.onBankSnapshot(qty(COINS, MAX_CASH));
+		state.onInventoryChanged(false, qty(COINS, MAX_CASH));
+		state.settleOwned();
+		GoalProgressView v = state.progressFor(goal(r, 1));
+		assertEquals(2 * MAX_CASH, v.getCurrent());
+		assertEquals(Integer.valueOf(85), v.getPercent());
+		assertFalse(v.isComplete());
+		// A third stack in a vault snapshot crosses 5B.
+		state.onContainerSnapshot("looting_bag", qty(COINS, 1_000_000_000L));
+		state.settleOwned();
+		assertTrue(state.progressFor(goal(r, 1)).isComplete());
+	}
+
+	@Test
+	public void lootedQuantityGoalAccumulatesPastIntRange() {
+		Roadmap r = roadmap(1, goalJson(1, "item_quantity", 0, 5_000_000_000L, false,
+				"{\"item_id\":" + COINS + "}"));
+		state.onServerRoadmap(r);
+		List<LootSyncPayload.LootItem> drop = Collections.singletonList(new LootSyncPayload.LootItem(COINS, MAX_CASH));
+		state.onLootDrop(1, "Big spender", 1, drop);
+		state.onLootDrop(1, "Big spender", 1, drop);
+		assertEquals(2 * MAX_CASH, state.progressFor(goal(r, 1)).getCurrent());
+		assertFalse(state.progressFor(goal(r, 1)).isComplete());
+		state.onLootDrop(1, "Big spender", 1, drop);
+		assertEquals(3 * MAX_CASH, state.progressFor(goal(r, 1)).getCurrent());
+		assertTrue(state.progressFor(goal(r, 1)).isComplete());
 	}
 }

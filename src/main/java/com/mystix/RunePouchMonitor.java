@@ -48,7 +48,7 @@ public class RunePouchMonitor {
 
 	private boolean dirty;
 	private GameState previousGameState = GameState.UNKNOWN;
-	private volatile BiConsumer<String, Map<Integer, Integer>> snapshotListener;
+	private volatile BiConsumer<String, Map<Integer, Long>> snapshotListener;
 
 	@Inject
 	public RunePouchMonitor(
@@ -65,7 +65,7 @@ public class RunePouchMonitor {
 	}
 
 	/** Receives every read (source, item id to quantity), before any sync gate. */
-	public void setSnapshotListener(BiConsumer<String, Map<Integer, Integer>> listener) {
+	public void setSnapshotListener(BiConsumer<String, Map<Integer, Long>> listener) {
 		this.snapshotListener = listener;
 	}
 
@@ -124,8 +124,8 @@ public class RunePouchMonitor {
 			types[i] = client.getVarbitValue(TYPE_VARBITS[i]);
 			quantities[i] = client.getVarbitValue(QUANTITY_VARBITS[i]);
 		}
-		Map<Integer, Integer> contents = contents(types, quantities, runes::getIntValue);
-		BiConsumer<String, Map<Integer, Integer>> listener = snapshotListener;
+		Map<Integer, Long> contents = ItemCollector.widen(contents(types, quantities, runes::getIntValue));
+		BiConsumer<String, Map<Integer, Long>> listener = snapshotListener;
 		if (listener != null) {
 			listener.accept(SOURCE, contents);
 		}

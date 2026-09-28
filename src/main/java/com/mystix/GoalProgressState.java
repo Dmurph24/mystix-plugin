@@ -131,11 +131,13 @@ final class GoalProgressState {
 		Integer taskId;
 		/** Owned-item goals: holdings when the goal was created (gain baseline),
 		 * and the banked parts as the server last saw them: per source when the
-		 * server sends the breakdown, else the legacy bank + vaults pair. */
-		Integer startQty;
-		Integer serverHeldBank;
-		int serverHeldVaults;
-		Map<String, Integer> serverHeldBySource;
+		 * server sends the breakdown, else the legacy bank + vaults pair.
+		 * Quantities are longs: OSRS lifted the max-cash cap, so a coins goal
+		 * (or its bank + inventory total) can pass 2,147,483,647. */
+		Long startQty;
+		Long serverHeldBank;
+		long serverHeldVaults;
+		Map<String, Long> serverHeldBySource;
 		/** Farming goals: when the goal was created (crops planted after count), and its matchers. */
 		Instant createdAt;
 		Integer farmItemId;
@@ -143,15 +145,15 @@ final class GoalProgressState {
 		String farmEntity;
 		/** Farming goals: patch completions already counted ("patchId:doneEpoch"). */
 		final Set<String> farmDone = new HashSet<>();
-		int serverCurrent;
-		int serverTarget;
+		long serverCurrent;
+		long serverTarget;
 		boolean serverComplete;
 		/** Absolute start XP for skill goals; -1 while unknown. */
 		long baselineXp = -1;
 		/** True once the baseline came from an acknowledged upload (kept stable). */
 		boolean baselineFromUpload;
 		/** Kills / items observed locally that the server has not counted yet. */
-		int localDelta;
+		long localDelta;
 		boolean locallyComplete;
 
 		boolean isComplete() {
@@ -178,9 +180,9 @@ final class GoalProgressState {
 	 * server's figure for that source for the rest of the session: the plugin
 	 * is the only writer of these sources while logged in, so it is never
 	 * staler than a roadmap read (which may predate a debounced upload). */
-	private final Map<Integer, Integer> liveInventory = new HashMap<>();
-	private final Map<Integer, Integer> liveEquipment = new HashMap<>();
-	private final Map<String, Map<Integer, Integer>> localBySource = new HashMap<>();
+	private final Map<Integer, Long> liveInventory = new HashMap<>();
+	private final Map<Integer, Long> liveEquipment = new HashMap<>();
+	private final Map<String, Map<Integer, Long>> localBySource = new HashMap<>();
 	/** True once the client has reported its inventory this session. */
 	private boolean inventorySeen;
 	/** Holdings changed since owned-item completions were last checked. */
@@ -262,7 +264,7 @@ final class GoalProgressState {
 				log.debug("Goal {} kc +{} -> {}/{}", lg.goal.getId(), kills, lg.serverCurrent + lg.localDelta, lg.serverTarget);
 				nowComplete = thresholdReached(lg);
 			} else if (lg.type == GoalType.ITEM_QUANTITY && lg.itemId != null) {
-				int qty = quantityOf(items, lg.itemId);
+				long qty = quantityOf(items, lg.itemId);
 				if (qty > 0) {
 					lg.localDelta += qty;
 					nowComplete = thresholdReached(lg);
@@ -387,8 +389,8 @@ final class GoalProgressState {
 	 * {@link #settleOwned()} so a transfer between containers that arrives as
 	 * two events in one tick cannot complete a goal in between.
 	 */
-	synchronized void onInventoryChanged(boolean equipment, Map<Integer, Integer> quantities) {
-		Map<Integer, Integer> target = equipment ? liveEquipment : liveInventory;
+	synchronized void onInventoryChanged(boolean equipment, Map<Integer, Long> quantities) {
+		Map<Integer, Long> target = equipment ? liveEquipment : liveInventory;
 		target.clear();
 		if (quantities != null) {
 			target.putAll(quantities);
@@ -399,7 +401,7 @@ final class GoalProgressState {
 
 	/** This session's bank upload: the bank proper, which supersedes the
 	 * server's banked figure for the rest of the session. */
-	synchronized void onBankSnapshot(Map<Integer, Integer> bankQuantities) {
+	synchronized void onBankSnapshot(Map<Integer, Long> bankQuantities) {
 		onContainerSnapshot(SOURCE_BANK, bankQuantities);
 	}
 
@@ -410,7 +412,7 @@ final class GoalProgressState {
 	 * server's figure for that source. Sources the server never reports
 	 * (client-only ledgers) simply add.
 	 */
-	synchronized void onContainerSnapshot(String source, Map<Integer, Integer> quantities) {
+	synchronized void onContainerSnapshot(String source, Map<Integer, Long> quantities) {
 		if (source == null || SOURCE_INVENTORY.equals(source)) {
 			return;
 		}
@@ -453,12 +455,13 @@ final class GoalProgressState {
 	 * there is one, else the server's figure) plus live inventory and
 	 * equipment. Null until the client has reported its inventory or when the
 	 * server sent no holdings at all. */
-	private Integer heldNow(LocalGoal lg) {
+	private Long heldNow(LocalGoal lg) {
 		if (!inventorySeen || lg.itemId == null) {
 			return null;
 		}
 		int itemId = lg.itemId;
-		int held = 0;
+		// A long total: bank + inventory coins (each up to max cash) must not wrap.
+		long held = 0;
 		if (lg.serverHeldBySource != null) {
 			Set<String> sources = new HashSet<>(lg.serverHeldBySource.keySet());
 			sources.addAll(localBySource.keySet());
@@ -466,10 +469,10 @@ final class GoalProgressState {
 				if (SOURCE_INVENTORY.equals(source)) {
 					continue;
 				}
-				Map<Integer, Integer> local = localBySource.get(source);
+				Map<Integer, Long> local = localBySource.get(source);
 				held += local != null
-						? local.getOrDefault(itemId, 0)
-						: lg.serverHeldBySource.getOrDefault(source, 0);
+						? local.getOrDefault(itemId, 0L)
+						: lg.serverHeldBySource.getOrDefault(source, 0L);
 			}
 		} else {
 			// Older server: bank + one vault total. Local vault snapshots may
@@ -477,19 +480,19 @@ final class GoalProgressState {
 			if (lg.serverHeldBank == null) {
 				return null;
 			}
-			Map<Integer, Integer> localBank = localBySource.get(SOURCE_BANK);
-			held = (localBank != null ? localBank.getOrDefault(itemId, 0) : lg.serverHeldBank) + lg.serverHeldVaults;
-			for (Map.Entry<String, Map<Integer, Integer>> e : localBySource.entrySet()) {
+			Map<Integer, Long> localBank = localBySource.get(SOURCE_BANK);
+			held = (localBank != null ? localBank.getOrDefault(itemId, 0L) : lg.serverHeldBank) + lg.serverHeldVaults;
+			for (Map.Entry<String, Map<Integer, Long>> e : localBySource.entrySet()) {
 				if (!SOURCE_BANK.equals(e.getKey())) {
-					held += e.getValue().getOrDefault(itemId, 0);
+					held += e.getValue().getOrDefault(itemId, 0L);
 				}
 			}
 		}
-		return held + liveInventory.getOrDefault(itemId, 0) + liveEquipment.getOrDefault(itemId, 0);
+		return held + liveInventory.getOrDefault(itemId, 0L) + liveEquipment.getOrDefault(itemId, 0L);
 	}
 
 	private boolean ownedReached(LocalGoal lg) {
-		Integer held = heldNow(lg);
+		Long held = heldNow(lg);
 		if (held == null || lg.serverTarget <= 0 || lg.startQty == null) {
 			return false;
 		}
@@ -629,7 +632,7 @@ final class GoalProgressState {
 				goals.put(g.getId(), lg);
 			}
 			boolean wasServerComplete = lg.serverComplete;
-			int oldDisplayed = lg.serverCurrent + lg.localDelta;
+			long oldDisplayed = lg.serverCurrent + lg.localDelta;
 
 			lg.goal = g;
 			lg.collectionId = collectionId;
@@ -701,13 +704,13 @@ final class GoalProgressState {
 	}
 
 	/** What the server last held in {@code source} for each in-progress owned goal's item. */
-	synchronized Map<Integer, Integer> serverHeldFor(String source) {
-		Map<Integer, Integer> held = new HashMap<>();
+	synchronized Map<Integer, Long> serverHeldFor(String source) {
+		Map<Integer, Long> held = new HashMap<>();
 		for (LocalGoal lg : goals.values()) {
 			if (lg.type != GoalType.ITEM_OWNED || lg.isComplete() || lg.itemId == null || lg.serverHeldBySource == null) {
 				continue;
 			}
-			Integer qty = lg.serverHeldBySource.get(source);
+			Long qty = lg.serverHeldBySource.get(source);
 			if (qty != null && qty > 0) {
 				held.put(lg.itemId, qty);
 			}
@@ -761,7 +764,7 @@ final class GoalProgressState {
 			return GoalProgressView.fromServer(goal);
 		}
 		GoalType type = lg.type;
-		int target = lg.serverTarget;
+		long target = lg.serverTarget;
 
 		if (type.isSkill()) {
 			Integer xp = lg.skillKey == null ? null : liveXp.get(lg.skillKey);
@@ -770,23 +773,23 @@ final class GoalProgressState {
 						lg.isComplete() ? Integer.valueOf(100) : goal.getProgressPercent(), lg.isComplete());
 			}
 			long gained = Math.max(0, xp - lg.baselineXp);
-			int current = (int) Math.max(lg.serverCurrent, Math.min(Integer.MAX_VALUE, gained));
+			long current = Math.max(lg.serverCurrent, gained);
 			boolean complete = lg.isComplete() || skillReached(lg, xp);
 			return new GoalProgressView(type, current, target, complete ? 100 : percent(current, target), complete);
 		}
 		if (usesLocalDelta(lg)) {
-			int current = lg.serverCurrent + lg.localDelta;
+			long current = lg.serverCurrent + lg.localDelta;
 			boolean complete = lg.isComplete() || thresholdReached(lg);
 			return new GoalProgressView(type, current, target, complete ? 100 : percent(current, target), complete);
 		}
 		if (type == GoalType.ITEM_OWNED) {
-			Integer held = heldNow(lg);
+			Long held = heldNow(lg);
 			if (held == null || lg.startQty == null) {
 				return new GoalProgressView(type, lg.serverCurrent, target,
 						lg.isComplete() ? Integer.valueOf(100) : goal.getProgressPercent(), lg.isComplete());
 			}
 			// Exact and live: goes down again if the items are dropped or used.
-			int current = Math.max(0, held - lg.startQty);
+			long current = Math.max(0, held - lg.startQty);
 			boolean complete = lg.isComplete() || ownedReached(lg);
 			return new GoalProgressView(type, current, target, complete ? 100 : percent(current, target), complete);
 		}
@@ -890,11 +893,11 @@ final class GoalProgressState {
 		return lg.serverTarget > 0 && lg.serverCurrent + lg.localDelta >= lg.serverTarget;
 	}
 
-	private static int quantityOf(List<LootSyncPayload.LootItem> items, int itemId) {
+	private static long quantityOf(List<LootSyncPayload.LootItem> items, int itemId) {
 		if (items == null) {
 			return 0;
 		}
-		int total = 0;
+		long total = 0;
 		for (LootSyncPayload.LootItem item : items) {
 			if (item != null && item.getItemId() == itemId) {
 				total += Math.max(0, item.getQuantity());
@@ -903,11 +906,16 @@ final class GoalProgressState {
 		return total;
 	}
 
-	private static Integer percent(int current, int target) {
+	private static Integer percent(long current, long target) {
 		if (target <= 0) {
 			return 0;
 		}
-		long pct = (long) current * 100L / target;
+		if (current >= target) {
+			return 100;
+		}
+		// current < target here; both are game quantities far below the
+		// ~9.2e16 at which current * 100 could overflow a long.
+		long pct = current * 100L / target;
 		return (int) Math.max(0, Math.min(100, pct));
 	}
 
