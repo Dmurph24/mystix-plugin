@@ -92,6 +92,9 @@ public class MystixPlugin extends Plugin {
 	private KillCountMonitor killCountMonitor;
 
 	@Inject
+	private DeathMonitor deathMonitor;
+
+	@Inject
 	private SlayerMonitor slayerMonitor;
 
 	@Inject
@@ -185,6 +188,7 @@ public class MystixPlugin extends Plugin {
 		eventBus.register(kingdomMonitor);
 		eventBus.register(combatAchievementMonitor);
 		eventBus.register(killCountMonitor);
+		eventBus.register(deathMonitor);
 		eventBus.register(slayerMonitor);
 		eventBus.register(slayerCatalogMonitor);
 		eventBus.register(slayerRewardsMonitor);
@@ -272,6 +276,7 @@ public class MystixPlugin extends Plugin {
 		eventBus.unregister(kingdomMonitor);
 		eventBus.unregister(combatAchievementMonitor);
 		eventBus.unregister(killCountMonitor);
+		eventBus.unregister(deathMonitor);
 		eventBus.unregister(slayerMonitor);
 		eventBus.unregister(slayerCatalogMonitor);
 		eventBus.unregister(slayerRewardsMonitor);
@@ -332,6 +337,7 @@ public class MystixPlugin extends Plugin {
 		kingdomMonitor.stop();
 		combatAchievementMonitor.stop();
 		killCountMonitor.stop();
+		deathMonitor.stop();
 		slayerMonitor.stop();
 		slayerCatalogMonitor.stop();
 		slayerRewardsMonitor.stop();
@@ -370,6 +376,7 @@ public class MystixPlugin extends Plugin {
 		kingdomMonitor.forceSync();
 		combatAchievementMonitor.forceSync();
 		killCountMonitor.forceSync();
+		deathMonitor.forceSync();
 		slayerMonitor.forceSync();
 		slayerCatalogMonitor.forceSync();
 	}
