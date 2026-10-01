@@ -139,9 +139,9 @@ public class PotionStorageMonitor {
 			Arrays.stream(triggers).forEach(potionStoreVarps::add);
 		}
 
-		Map<Integer, Integer> quantities = new LinkedHashMap<>();
+		Map<Integer, Long> quantities = new LinkedHashMap<>();
 		for (BankSyncPayload.BankItem item : collectPotionItems()) {
-			quantities.merge(item.getItemId(), item.getQuantity(), Integer::sum);
+			quantities.merge(item.getItemId(), item.getQuantity(), Long::sum);
 		}
 		syncer.submit(quantities, false);
 	}

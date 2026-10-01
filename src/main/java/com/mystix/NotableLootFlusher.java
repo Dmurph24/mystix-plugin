@@ -40,18 +40,28 @@ class NotableLootFlusher
 	 * A stack is notable when it is worth at least {@link #NOTABLE_STACK_VALUE}, or is a
 	 * single untradeable item (pets, collection log uniques). Untradeable stacks such as
 	 * currencies and shards drop constantly and are not notable.
+	 *
+	 * <p>Prices and quantities are longs: RuneLite 1.13 returns item prices as
+	 * {@code long} (OSRS lifted the max-cash cap), and the stack value is
+	 * compared by division so no price times quantity can overflow.
 	 */
-	static boolean isNotable(int itemId, int quantity, long unitPrice, boolean tradeable)
+	static boolean isNotable(int itemId, long quantity, long unitPrice, boolean tradeable)
 	{
 		if (quantity <= 0 || itemId == ItemID.COINS)
 		{
 			return false;
 		}
-		if (unitPrice * quantity >= NOTABLE_STACK_VALUE)
+		if (unitPrice > 0 && quantity >= ceilDiv(NOTABLE_STACK_VALUE, unitPrice))
 		{
 			return true;
 		}
 		return !tradeable && quantity == 1;
+	}
+
+	/** Ceiling of {@code a / b} for positive operands, without overflow. */
+	private static long ceilDiv(long a, long b)
+	{
+		return a / b + (a % b == 0 ? 0 : 1);
 	}
 
 	/**

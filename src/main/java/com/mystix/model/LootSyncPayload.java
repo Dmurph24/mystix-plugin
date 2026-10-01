@@ -80,14 +80,16 @@ public class LootSyncPayload
 	}
 
 	/**
-	 * Represents a single item in loot data.
+	 * Represents a single item in loot data. The quantity is a long: aggregated
+	 * loot (e.g. coins summed over every kill in the loot tracker) can exceed
+	 * int range now that OSRS has lifted the max-cash cap.
 	 */
 	public static class LootItem
 	{
 		private final int item_id;
-		private final int quantity;
+		private final long quantity;
 
-		public LootItem(int itemId, int quantity)
+		public LootItem(int itemId, long quantity)
 		{
 			this.item_id = itemId;
 			this.quantity = quantity;
@@ -98,7 +100,7 @@ public class LootSyncPayload
 			return item_id;
 		}
 
-		public int getQuantity()
+		public long getQuantity()
 		{
 			return quantity;
 		}

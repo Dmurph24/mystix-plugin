@@ -10,13 +10,14 @@ import com.mystix.model.RoadmapGoal;
  */
 public final class GoalProgressView {
 	private final GoalType type;
-	private final int current;
-	private final int target;
+	/** Longs: net worth and owned-coins goals pass int range (OSRS lifted max cash). */
+	private final long current;
+	private final long target;
 	/** 0-100, or null for binary goals that have no progress bar. */
 	private final Integer percent;
 	private final boolean complete;
 
-	GoalProgressView(GoalType type, int current, int target, Integer percent, boolean complete) {
+	GoalProgressView(GoalType type, long current, long target, Integer percent, boolean complete) {
 		this.type = type;
 		this.current = current;
 		this.target = target;
@@ -37,11 +38,11 @@ public final class GoalProgressView {
 		return type;
 	}
 
-	public int getCurrent() {
+	public long getCurrent() {
 		return current;
 	}
 
-	public int getTarget() {
+	public long getTarget() {
 		return target;
 	}
 

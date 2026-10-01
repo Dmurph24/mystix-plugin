@@ -308,10 +308,11 @@ public class LootMonitor
 		}
 	}
 
-	private boolean isNotable(int itemId, int quantity)
+	private boolean isNotable(int itemId, long quantity)
 	{
 		ItemComposition comp = itemManager.getItemComposition(itemId);
 		boolean tradeable = comp == null || comp.isTradeable();
+		// getItemPrice is int before RuneLite 1.13 and long from it; both widen to the long parameter.
 		return NotableLootFlusher.isNotable(itemId, quantity, itemManager.getItemPrice(itemId), tradeable);
 	}
 
@@ -412,7 +413,7 @@ public class LootMonitor
 				for (LootSyncPayload.LootItem item : record.getItems())
 				{
 					md.update(intToBytes(item.getItemId()));
-					md.update(intToBytes(item.getQuantity()));
+					md.update(quantityToBytes(item.getQuantity()));
 				}
 			}
 			byte[] digest = md.digest();
@@ -433,6 +434,25 @@ public class LootMonitor
 	private static byte[] intToBytes(int value)
 	{
 		return new byte[] {
+			(byte) (value >> 24), (byte) (value >> 16),
+			(byte) (value >> 8), (byte) value
+		};
+	}
+
+	/**
+	 * Quantities within int range hash exactly as they did when they were ints,
+	 * so the persisted last-sync hash stays valid across this change; only a
+	 * quantity past max cash (2,147,483,647) hashes as a full long.
+	 */
+	static byte[] quantityToBytes(long value)
+	{
+		if (value == (int) value)
+		{
+			return intToBytes((int) value);
+		}
+		return new byte[] {
+			(byte) (value >> 56), (byte) (value >> 48),
+			(byte) (value >> 40), (byte) (value >> 32),
 			(byte) (value >> 24), (byte) (value >> 16),
 			(byte) (value >> 8), (byte) value
 		};
@@ -518,20 +538,22 @@ public class LootMonitor
 		int npcId = npcName.hashCode() & 0x7FFFFFFF;
 		int killCount = obj.has("kills") ? obj.get("kills").getAsInt() : 0;
 
-		Map<Integer, Integer> aggregatedItems = new LinkedHashMap<>();
+		// Long sums: the loot tracker aggregates every kill, so coins summed
+		// across drops can pass max cash (2,147,483,647).
+		Map<Integer, Long> aggregatedItems = new LinkedHashMap<>();
 		if (obj.has("drops"))
 		{
 			JsonArray drops = obj.getAsJsonArray("drops");
 			for (int i = 0; i + 1 < drops.size(); i += 2)
 			{
 				int itemId = drops.get(i).getAsInt();
-				int quantity = drops.get(i + 1).getAsInt();
-				aggregatedItems.merge(itemId, quantity, Integer::sum);
+				long quantity = drops.get(i + 1).getAsLong();
+				aggregatedItems.merge(itemId, quantity, Long::sum);
 			}
 		}
 
 		List<LootSyncPayload.LootItem> items = new ArrayList<>();
-		for (Map.Entry<Integer, Integer> entry : aggregatedItems.entrySet())
+		for (Map.Entry<Integer, Long> entry : aggregatedItems.entrySet())
 		{
 			items.add(new LootSyncPayload.LootItem(entry.getKey(), entry.getValue()));
 		}

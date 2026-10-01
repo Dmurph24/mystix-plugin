@@ -67,8 +67,9 @@ public class StorageItemMonitor {
 
 		Tracked(StorageItemSpec spec) {
 			this.ledger = new StorageItemLedger(spec, StorageItemMonitor.this::itemName, () -> {
-				java.util.function.Function<String, Map<Integer, Integer>> s = seedSupplier;
-				return s == null ? Map.of() : s.apply(spec.source);
+				// The ledger counts in ints (a barrel holds 28); the goal pipeline carries longs.
+				java.util.function.Function<String, Map<Integer, Long>> s = seedSupplier;
+				return s == null ? Map.of() : ItemCollector.narrowSaturated(s.apply(spec.source));
 			});
 			this.syncer = new SourceSyncer(spec.source, gson, executor,
 					() -> config.syncBankMemory() && SyncGuard.hasAppKey(config) && !GameModeUtil.isSpecialGameMode(client),
@@ -113,23 +114,23 @@ public class StorageItemMonitor {
 	private final Set<Integer> inventoryIds = new HashSet<>();
 	private final Set<Integer> equipmentIds = new HashSet<>();
 	/** Canonical id to quantity, for per-item inventory diffs. */
-	private Map<Integer, Integer> inventoryQuantities = new HashMap<>();
+	private Map<Integer, Long> inventoryQuantities = new HashMap<>();
 	private GameState previousGameState = GameState.UNKNOWN;
 	private boolean pushAll;
 	private boolean bankOpen;
 	private boolean depositBoxOpen;
 	/** Receives a container's contents when it is emptied into a deposit box (no bank container follows); set by the plugin. */
-	private volatile Consumer<Map<Integer, Integer>> emptiedToDepositBoxListener;
+	private volatile Consumer<Map<Integer, Long>> emptiedToDepositBoxListener;
 
-	public void setEmptiedToDepositBoxListener(Consumer<Map<Integer, Integer>> listener) {
+	public void setEmptiedToDepositBoxListener(Consumer<Map<Integer, Long>> listener) {
 		this.emptiedToDepositBoxListener = listener;
 	}
 
-	private volatile BiConsumer<String, Map<Integer, Integer>> snapshotListener;
+	private volatile BiConsumer<String, Map<Integer, Long>> snapshotListener;
 	/** Source to what the server last held for the goal items in it; set by the plugin from the goal tracker. */
-	private volatile java.util.function.Function<String, Map<Integer, Integer>> seedSupplier;
+	private volatile java.util.function.Function<String, Map<Integer, Long>> seedSupplier;
 
-	public void setSeedSupplier(java.util.function.Function<String, Map<Integer, Integer>> supplier) {
+	public void setSeedSupplier(java.util.function.Function<String, Map<Integer, Long>> supplier) {
 		this.seedSupplier = supplier;
 	}
 
@@ -157,7 +158,7 @@ public class StorageItemMonitor {
 	}
 
 	/** Receives every ledger change (source, item id to quantity), before any sync gate. */
-	public void setSnapshotListener(BiConsumer<String, Map<Integer, Integer>> listener) {
+	public void setSnapshotListener(BiConsumer<String, Map<Integer, Long>> listener) {
 		this.snapshotListener = listener;
 	}
 
@@ -263,20 +264,21 @@ public class StorageItemMonitor {
 		ItemContainer container = client.getItemContainer(containerId);
 		Set<Integer> ids = containerId == InventoryID.INV ? inventoryIds : equipmentIds;
 		ids.clear();
-		Map<Integer, Integer> quantities = new HashMap<>();
+		Map<Integer, Long> quantities = new HashMap<>();
 		if (container != null) {
 			for (Item item : container.getItems()) {
 				if (item == null || item.getId() <= 0 || item.getQuantity() <= 0) {
 					continue;
 				}
 				ids.add(item.getId());
-				quantities.merge(itemManager.canonicalize(item.getId()), item.getQuantity(), Integer::sum);
+				long quantity = item.getQuantity();
+				quantities.merge(itemManager.canonicalize(item.getId()), quantity, Long::sum);
 			}
 		}
 		if (containerId != InventoryID.INV) {
 			return;
 		}
-		Map<Integer, Integer> previous = inventoryQuantities;
+		Map<Integer, Long> previous = inventoryQuantities;
 		inventoryQuantities = quantities;
 		for (Tracked t : tracked) {
 			if (!t.carried()) {
@@ -285,11 +287,13 @@ public class StorageItemMonitor {
 			Map<Integer, Integer> added = new LinkedHashMap<>();
 			Map<Integer, Integer> removed = new LinkedHashMap<>();
 			for (int id : t.ledger.spec.acceptedIds) {
-				int delta = quantities.getOrDefault(id, 0) - previous.getOrDefault(id, 0);
+				long delta = quantities.getOrDefault(id, 0L) - previous.getOrDefault(id, 0L);
+				// Accepted items are fish, logs, ores...: a tick's delta fits an int,
+				// but saturate rather than wrap if it somehow does not.
 				if (delta > 0) {
-					added.put(id, delta);
+					added.put(id, (int) Math.min(Integer.MAX_VALUE, delta));
 				} else if (delta < 0) {
-					removed.put(id, -delta);
+					removed.put(id, (int) Math.min(Integer.MAX_VALUE, -delta));
 				}
 			}
 			if (!added.isEmpty() || !removed.isEmpty()) {
@@ -393,10 +397,10 @@ public class StorageItemMonitor {
 				// deposit overlay) takes the items, so the ledger lets go of
 				// them now rather than waiting for a message the game may not
 				// send for the item's own Empty option.
-				Map<Integer, Integer> contents = t.ledger.contents();
+				Map<Integer, Long> contents = ItemCollector.widen(t.ledger.contents());
 				t.ledger.clear();
 				if (!bankOpen && !contents.isEmpty()) {
-					Consumer<Map<Integer, Integer>> listener = emptiedToDepositBoxListener;
+					Consumer<Map<Integer, Long>> listener = emptiedToDepositBoxListener;
 					if (listener != null) {
 						listener.accept(contents);
 					}
@@ -453,8 +457,8 @@ public class StorageItemMonitor {
 			if (!changed && !(push && t.ledger.isKnown())) {
 				continue;
 			}
-			Map<Integer, Integer> contents = t.ledger.contents();
-			BiConsumer<String, Map<Integer, Integer>> listener = snapshotListener;
+			Map<Integer, Long> contents = ItemCollector.widen(t.ledger.contents());
+			BiConsumer<String, Map<Integer, Long>> listener = snapshotListener;
 			if (listener != null) {
 				listener.accept(t.ledger.spec.source, contents);
 			}
