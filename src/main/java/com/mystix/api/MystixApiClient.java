@@ -9,6 +9,7 @@ import com.mystix.model.HouseLocationSyncPayload;
 import com.mystix.model.BankSyncPayload;
 import com.mystix.model.CollectionLogSyncPayload;
 import com.mystix.model.CombatAchievementsSyncPayload;
+import com.mystix.model.DeathSyncPayload;
 import com.mystix.model.KillCountsSyncPayload;
 import com.mystix.model.KingdomSyncPayload;
 import com.mystix.model.LoadoutSyncPayload;
@@ -71,6 +72,7 @@ public class MystixApiClient
 	private static final String ACHIEVEMENT_DIARIES_ENDPOINT = "/api/runelite/achievement-diaries/";
 	private static final String HOUSE_LOCATION_ENDPOINT = "/api/runelite/house-location/";
 	private static final String COMBAT_ACHIEVEMENTS_ENDPOINT = "/api/runelite/combat-achievements/";
+	private static final String DEATHS_ENDPOINT = "/api/runelite/deaths/";
 	private static final String KILL_COUNTS_ENDPOINT = "/api/runelite/kill-counts/";
 	private static final String KINGDOM_ENDPOINT = "/api/runelite/kingdom/";
 	private static final String LOADOUT_ENDPOINT = "/api/runelite/loadouts/";
@@ -196,6 +198,23 @@ public class MystixApiClient
 		postAsync(COMBAT_ACHIEVEMENTS_ENDPOINT, payload.toJson(gson), "combat-achievements", false, true,
 			() -> log.debug("Mystix combat achievements sync successful: {} tasks for player: {}",
 				payload.getCombatAchievements().size(), payload.getPlayerUsername()));
+	}
+
+	/**
+	 * Sends the queued deaths. Never deduped: an identical body is a retry of
+	 * deaths the backend has not acknowledged yet, or the login handshake.
+	 */
+	public void sendDeathsSync(DeathSyncPayload payload, Runnable onSuccess)
+	{
+		postAsync(DEATHS_ENDPOINT, payload.toJson(gson), "deaths", false, false,
+			() -> {
+				log.debug("Mystix deaths sync successful: {} deaths for player: {}",
+					payload.getEvents().size(), payload.getPlayerUsername());
+				if (onSuccess != null)
+				{
+					onSuccess.run();
+				}
+			});
 	}
 
 	public void sendKillCountsSync(KillCountsSyncPayload payload)

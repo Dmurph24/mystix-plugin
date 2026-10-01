@@ -154,6 +154,16 @@ public interface MystixConfig extends Config {
 		return true;
 	}
 
+	@ConfigItem(
+			keyName = "syncDeaths",
+			name = "Deaths",
+			description = "Sync your deaths (what killed you, where and when) to Mystix for your weekly recap and stream overlays.",
+			section = SYNC_SECTION,
+			position = 12)
+	default boolean syncDeaths() {
+		return true;
+	}
+
 	// --- Plugin Features ---
 
 	@ConfigItem(
