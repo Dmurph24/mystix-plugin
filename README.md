@@ -8,4 +8,4 @@ Settings are grouped into **Data Syncing** (which data the plugin sends to the a
 
 The goal overlay updates as you play: XP, kills, drops and collection log unlocks move the bar immediately and the plugin syncs with the app in the background. For the completion sound, "Custom file" plays `~/.runelite/mystix/goal-complete.wav`.
 
-If Mystix rejects your App Key (for example after you regenerate it in the app), the plugin tells you in red in the chatbox, and again on each login until it's fixed. It does the same when Mystix has been unreachable for a couple of minutes, and says so when syncing works again. "Sync problem warning" switches this to a banner at the top of the game window, or turns it off.
+If Mystix rejects your App Key (for example after you regenerate it in the app), the plugin tells you in red in the chatbox, and again on each login until it's fixed. It does the same when Mystix has been unreachable for a couple of minutes (at most once every 10 minutes, so a flaky connection doesn't fill your chat), and says so when syncing works again. "Sync problem warning" switches this to a banner at the top of the game window, or turns it off.
