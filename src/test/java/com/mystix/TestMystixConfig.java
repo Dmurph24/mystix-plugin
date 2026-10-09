@@ -20,7 +20,7 @@ public class TestMystixConfig implements MystixConfig {
 	private boolean showGoalProgress = true;
 	private boolean showGoalPopup = true;
 	private GoalCompleteSound goalCompleteSound = GoalCompleteSound.IN_GAME;
-	private boolean showSyncWarning = true;
+	private SyncWarningStyle syncWarning = SyncWarningStyle.CHAT;
 
 	@Override
 	public String mystixAppKey() {
@@ -163,12 +163,12 @@ public class TestMystixConfig implements MystixConfig {
 	}
 
 	@Override
-	public boolean showSyncWarning() {
-		return showSyncWarning;
+	public SyncWarningStyle syncWarning() {
+		return syncWarning;
 	}
 
-	public void setShowSyncWarning(boolean value) {
-		this.showSyncWarning = value;
+	public void setSyncWarning(SyncWarningStyle value) {
+		this.syncWarning = value;
 	}
 
 	public void setGoalCompleteSound(GoalCompleteSound value) {

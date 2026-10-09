@@ -207,12 +207,12 @@ public interface MystixConfig extends Config {
 	}
 
 	@ConfigItem(
-			keyName = "showSyncWarning",
+			keyName = "syncWarning",
 			name = "Sync problem warning",
-			description = "Show a red banner in the game window when Mystix rejects your App Key or can't be reached, so you know nothing is syncing.",
+			description = "How to tell you when Mystix rejects your App Key or can't be reached, so you know nothing is syncing: a red chat message, a banner in the game window, or nothing.",
 			section = FEATURES_SECTION,
 			position = 4)
-	default boolean showSyncWarning() {
-		return true;
+	default SyncWarningStyle syncWarning() {
+		return SyncWarningStyle.CHAT;
 	}
 }

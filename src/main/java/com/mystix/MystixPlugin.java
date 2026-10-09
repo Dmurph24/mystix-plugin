@@ -151,6 +151,9 @@ public class MystixPlugin extends Plugin {
 	@Inject
 	private SyncWarningOverlay syncWarningOverlay;
 
+	@Inject
+	private SyncWarningChat syncWarningChat;
+
 	private RoadmapPanel roadmapPanel;
 	private NavigationButton navButton;
 
@@ -199,6 +202,7 @@ public class MystixPlugin extends Plugin {
 		eventBus.register(slayerCatalogMonitor);
 		eventBus.register(slayerRewardsMonitor);
 		eventBus.register(goalProgressTracker);
+		eventBus.register(syncWarningChat);
 
 		timerMonitor.start();
 		lootMonitor.start();
@@ -260,7 +264,8 @@ public class MystixPlugin extends Plugin {
 		overlayManager.add(nextGoalOverlay);
 		// Roadmap progress drawn under the goal completion popup while it shows.
 		overlayManager.add(goalCompletionOverlay);
-		// Red banner while the App Key is rejected or Mystix can't be reached.
+		// Banner while the App Key is rejected or Mystix can't be reached
+		// (when the sync warning is set to Banner; Chat posts to the chatbox).
 		overlayManager.add(syncWarningOverlay);
 	}
 
@@ -289,6 +294,7 @@ public class MystixPlugin extends Plugin {
 		eventBus.unregister(slayerCatalogMonitor);
 		eventBus.unregister(slayerRewardsMonitor);
 		eventBus.unregister(goalProgressTracker);
+		eventBus.unregister(syncWarningChat);
 
 		roadmapManager.stopPeriodicRefresh();
 		roadmapManager.setRoadmapListener(null);
@@ -359,6 +365,7 @@ public class MystixPlugin extends Plugin {
 		overlayManager.remove(goalCompletionOverlay);
 		overlayManager.remove(syncWarningOverlay);
 		syncHealth.reset();
+		syncWarningChat.reset();
 		roadmapManager.clear();
 		log.debug("Mystix stopped");
 	}
@@ -417,6 +424,7 @@ public class MystixPlugin extends Plugin {
 		if (MystixConfig.CONFIG_GROUP.equals(event.getGroup()) && MystixConfig.APP_KEY.equals(event.getKey())) {
 			// A new key gets a clean slate; the next sync decides whether it works.
 			syncHealth.reset();
+			syncWarningChat.reset();
 		}
 		if (!SyncGuard.isCompleteAppKeyEntry(event.getGroup(), event.getKey(), event.getNewValue())) {
 			return;
