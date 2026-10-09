@@ -145,6 +145,12 @@ public class MystixPlugin extends Plugin {
 	@Inject
 	private GoalImageCache goalImageCache;
 
+	@Inject
+	private SyncHealth syncHealth;
+
+	@Inject
+	private SyncWarningOverlay syncWarningOverlay;
+
 	private RoadmapPanel roadmapPanel;
 	private NavigationButton navButton;
 
@@ -254,6 +260,8 @@ public class MystixPlugin extends Plugin {
 		overlayManager.add(nextGoalOverlay);
 		// Roadmap progress drawn under the goal completion popup while it shows.
 		overlayManager.add(goalCompletionOverlay);
+		// Red banner while the App Key is rejected or Mystix can't be reached.
+		overlayManager.add(syncWarningOverlay);
 	}
 
 	@Override
@@ -349,6 +357,8 @@ public class MystixPlugin extends Plugin {
 		roadmapPanel = null;
 		overlayManager.remove(nextGoalOverlay);
 		overlayManager.remove(goalCompletionOverlay);
+		overlayManager.remove(syncWarningOverlay);
+		syncHealth.reset();
 		roadmapManager.clear();
 		log.debug("Mystix stopped");
 	}
@@ -404,6 +414,10 @@ public class MystixPlugin extends Plugin {
 	 */
 	@Subscribe
 	public void onConfigChanged(ConfigChanged event) {
+		if (MystixConfig.CONFIG_GROUP.equals(event.getGroup()) && MystixConfig.APP_KEY.equals(event.getKey())) {
+			// A new key gets a clean slate; the next sync decides whether it works.
+			syncHealth.reset();
+		}
 		if (!SyncGuard.isCompleteAppKeyEntry(event.getGroup(), event.getKey(), event.getNewValue())) {
 			return;
 		}

@@ -2,6 +2,8 @@ package com.mystix.api;
 
 import com.google.gson.Gson;
 import com.mystix.MystixConfig;
+import com.mystix.SyncHealth;
+import com.mystix.TestMystixConfig;
 import com.mystix.model.BankSyncPayload;
 import com.mystix.model.PlayerSkillsSyncPayload;
 import com.mystix.model.Roadmap;
@@ -213,6 +215,70 @@ public class MystixApiClientTest {
 		assertTrue(done.await(5, TimeUnit.SECONDS));
 		assertEquals(MystixApiClient.PLUGIN_VERSION, sent.get().header(MystixApiClient.VERSION_HEADER));
 		assertEquals("test-key", sent.get().header("X-RuneLite-Key"));
+	}
+
+	/** A base client that answers every call with {@code code}, then runs {@code beforeReply}. */
+	private static OkHttpClient answeringClient(int code, Runnable beforeReply, CountDownLatch done) {
+		return new OkHttpClient.Builder()
+				.addInterceptor(chain -> {
+					beforeReply.run();
+					return new Response.Builder()
+							.request(chain.request())
+							.protocol(Protocol.HTTP_1_1)
+							.code(code)
+							.message("status " + code)
+							.body(ResponseBody.create(null, "{\"roadmaps\":[]}"))
+							.build();
+				})
+				.build();
+	}
+
+	private static MystixApiClient.RoadmapCallback<RoadmapList> countDown(CountDownLatch done) {
+		return new MystixApiClient.RoadmapCallback<RoadmapList>() {
+			@Override
+			public void onSuccess(RoadmapList result) {
+				done.countDown();
+			}
+
+			@Override
+			public void onError(String message) {
+				done.countDown();
+			}
+		};
+	}
+
+	private static SyncHealth.Status statusAfter(int code, TestMystixConfig config, Runnable beforeReply)
+			throws InterruptedException {
+		SyncHealth health = new SyncHealth();
+		CountDownLatch done = new CountDownLatch(1);
+		MystixApiClient client = new MystixApiClient(
+				config, new Gson(), answeringClient(code, beforeReply, done), health);
+		client.getRoadmaps("Zezima", countDown(done));
+		assertTrue(done.await(5, TimeUnit.SECONDS));
+		return health.status();
+	}
+
+	private static TestMystixConfig keyed(String key) {
+		TestMystixConfig config = new TestMystixConfig();
+		config.setMystixAppKey(key);
+		return config;
+	}
+
+	@Test
+	public void rejectedKeyIsReported() throws InterruptedException {
+		assertEquals(SyncHealth.Status.KEY_REJECTED, statusAfter(403, keyed("old-key"), () -> { }));
+	}
+
+	@Test
+	public void acceptedKeyIsReported() throws InterruptedException {
+		assertEquals(SyncHealth.Status.OK, statusAfter(200, keyed("good-key"), () -> { }));
+	}
+
+	@Test
+	public void lateRejectionOfAnEditedKeyIsIgnored() throws InterruptedException {
+		TestMystixConfig config = keyed("old-key");
+		// The player pastes a new key while the old key's request is in flight.
+		assertEquals(SyncHealth.Status.OK, statusAfter(403, config, () -> config.setMystixAppKey("new-key")));
 	}
 
 	@Test
