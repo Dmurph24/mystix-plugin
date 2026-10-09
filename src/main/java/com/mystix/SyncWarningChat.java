@@ -20,7 +20,7 @@ import net.runelite.client.eventbus.Subscribe;
 @Singleton
 public class SyncWarningChat {
 	static final String KEY_REJECTED_MESSAGE =
-			"Mystix: App Key not accepted, nothing is syncing. Paste your key from the Mystix app.";
+			"Mystix: App Key not accepted, nothing is syncing. Paste a new key from the app.";
 	static final String UNREACHABLE_MESSAGE = "Mystix: can't connect, your data isn't syncing right now.";
 	static final String RECOVERED_MESSAGE = "Mystix: syncing again.";
 
