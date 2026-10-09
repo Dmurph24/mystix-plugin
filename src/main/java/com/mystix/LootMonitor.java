@@ -47,6 +47,8 @@ public class LootMonitor
 	private static final String LOOT_TRACKER_CONFIG_GROUP = "loottracker";
 	private static final String LOOT_TRACKER_DROPS_PREFIX = "drops_";
 	private static final String LAST_SYNC_HASH_KEY = "lootSyncHash";
+	/** Moons defeated since the Lunar Chest was last opened; the chest's reward grows with each. */
+	private static final Map<String, int[]> CONTEXT_VARBITS = Map.of("Lunar Chest", new int[]{9858, 9859, 9860});
 
 	private final Client client;
 	private final MystixConfig config;
@@ -289,8 +291,26 @@ public class LootMonitor
 			return;
 		}
 
+		Map<String, Object> context = new LinkedHashMap<>();
+		Object metadata = event.getMetadata();
+		if (metadata instanceof Integer || metadata instanceof int[])
+		{
+			context.put("metadata", metadata);
+		}
+		int[] varbits = CONTEXT_VARBITS.get(npcName);
+		if (varbits != null)
+		{
+			Map<String, Integer> values = new LinkedHashMap<>();
+			for (int varbit : varbits)
+			{
+				values.put(String.valueOf(varbit), client.getVarbitValue(varbit));
+			}
+			context.put("varbits", values);
+		}
+
 		String droppedAt = DateTimeFormatter.ISO_INSTANT.format(Instant.now().atOffset(ZoneOffset.UTC));
-		LootDropPayload payload = new LootDropPayload(playerUsername, clientId, npcId, npcName, killCount, droppedAt, items);
+		LootDropPayload payload = new LootDropPayload(playerUsername, clientId, npcId, npcName, killCount, droppedAt, items,
+			context.isEmpty() ? null : context);
 		log.debug("Loot drop from {} (id={}, kc={}): {} items (queued)", npcName, npcId, killCount, items.size());
 
 		synchronized (pendingDrops)

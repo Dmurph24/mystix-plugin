@@ -2,6 +2,7 @@ package com.mystix.model;
 
 import com.google.gson.Gson;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Payload for a real-time single loot drop to the Mystix API.
@@ -16,9 +17,10 @@ public class LootDropPayload
 	private final Integer kill_count;
 	private final String dropped_at;
 	private final List<LootSyncPayload.LootItem> items;
+	private final Map<String, Object> context;
 
 	public LootDropPayload(String playerUsername, String sourceClient, int npcId, String npcName,
-		Integer killCount, String droppedAt, List<LootSyncPayload.LootItem> items)
+		Integer killCount, String droppedAt, List<LootSyncPayload.LootItem> items, Map<String, Object> context)
 	{
 		this.player_username = playerUsername;
 		this.source_client = sourceClient;
@@ -27,6 +29,7 @@ public class LootDropPayload
 		this.kill_count = killCount;
 		this.dropped_at = droppedAt;
 		this.items = items;
+		this.context = context;
 	}
 
 	public String getPlayerUsername()
@@ -62,6 +65,11 @@ public class LootDropPayload
 	public List<LootSyncPayload.LootItem> getItems()
 	{
 		return items;
+	}
+
+	public Map<String, Object> getContext()
+	{
+		return context;
 	}
 
 	public String toJson(Gson gson)
