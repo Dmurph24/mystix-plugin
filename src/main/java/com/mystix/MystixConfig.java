@@ -205,4 +205,14 @@ public interface MystixConfig extends Config {
 	default GoalCompleteSound goalCompleteSound() {
 		return GoalCompleteSound.IN_GAME;
 	}
+
+	@ConfigItem(
+			keyName = "syncWarning",
+			name = "Sync problem warning",
+			description = "How to tell you when Mystix rejects your App Key or can't be reached, so you know nothing is syncing: a red chat message, a banner in the game window, or nothing.",
+			section = FEATURES_SECTION,
+			position = 4)
+	default SyncWarningStyle syncWarning() {
+		return SyncWarningStyle.CHAT;
+	}
 }

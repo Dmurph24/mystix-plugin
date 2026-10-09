@@ -4,6 +4,7 @@ import com.google.gson.Gson;
 import com.google.gson.JsonSyntaxException;
 import com.mystix.MystixConfig;
 import com.mystix.SyncGuard;
+import com.mystix.SyncHealth;
 import com.mystix.model.AchievementDiariesSyncPayload;
 import com.mystix.model.HouseLocationSyncPayload;
 import com.mystix.model.BankSyncPayload;
@@ -91,16 +92,23 @@ public class MystixApiClient
 	private final Gson gson;
 	private final OkHttpClient okHttpClient;
 	private final OkHttpClient largeRequestClient;
+	private final SyncHealth syncHealth;
 
 	// Last successfully-sent body per syncType; skips byte-identical idempotent
 	// re-syncs. Excludes loot-drops, which are append-style events.
 	private final Map<String, String> lastSentBodyByType = new ConcurrentHashMap<>();
 
-	@Inject
 	public MystixApiClient(MystixConfig config, Gson gson, OkHttpClient okHttpClient)
+	{
+		this(config, gson, okHttpClient, new SyncHealth());
+	}
+
+	@Inject
+	public MystixApiClient(MystixConfig config, Gson gson, OkHttpClient okHttpClient, SyncHealth syncHealth)
 	{
 		this.config = config;
 		this.gson = gson;
+		this.syncHealth = syncHealth;
 		this.okHttpClient = withVersionHeader(okHttpClient.newBuilder())
 			.callTimeout(REQUEST_TIMEOUT_SECONDS, TimeUnit.SECONDS)
 			.build();
@@ -382,13 +390,14 @@ public class MystixApiClient
 			return;
 		}
 
+		String appKey = config.mystixAppKey().trim();
 		Request request = new Request.Builder()
 			.url(API_BASE_URL + endpoint)
-			.header("X-RuneLite-Key", config.mystixAppKey().trim())
+			.header("X-RuneLite-Key", appKey)
 			.get()
 			.build();
 
-		okHttpClient.newCall(request).enqueue(parsingCallback(label, type, callback));
+		okHttpClient.newCall(request).enqueue(parsingCallback(label, type, appKey, callback));
 	}
 
 	private <T> void postForResult(String endpoint, String json, String label, Class<T> type,
@@ -400,17 +409,19 @@ public class MystixApiClient
 			return;
 		}
 
+		String appKey = config.mystixAppKey().trim();
 		Request request = new Request.Builder()
 			.url(API_BASE_URL + endpoint)
 			.header("Content-Type", "application/json")
-			.header("X-RuneLite-Key", config.mystixAppKey().trim())
+			.header("X-RuneLite-Key", appKey)
 			.post(RequestBody.create(JSON_MEDIA_TYPE, json))
 			.build();
 
-		largeRequestClient.newCall(request).enqueue(parsingCallback(label, type, callback));
+		largeRequestClient.newCall(request).enqueue(parsingCallback(label, type, appKey, callback));
 	}
 
-	private <T> Callback parsingCallback(String label, Class<T> type, RoadmapCallback<T> callback)
+	private <T> Callback parsingCallback(String label, Class<T> type, String appKey,
+		RoadmapCallback<T> callback)
 	{
 		return new Callback()
 		{
@@ -418,6 +429,7 @@ public class MystixApiClient
 			public void onFailure(Call call, IOException e)
 			{
 				log.warn("Failed {} request to Mystix API: {}", label, e.getMessage());
+				recordFailure(appKey);
 				callback.onError("Network error");
 			}
 
@@ -426,6 +438,7 @@ public class MystixApiClient
 			{
 				try
 				{
+					recordResponse(appKey, response.code());
 					if (response.code() < HTTP_OK_MIN || response.code() >= HTTP_OK_MAX)
 					{
 						log.warn("Mystix API returned {} for {}", response.code(), label);
@@ -485,13 +498,13 @@ public class MystixApiClient
 			return;
 		}
 
-		String appKey = config.mystixAppKey();
+		String appKey = config.mystixAppKey().trim();
 		String url = API_BASE_URL + endpoint;
 
 		Request request = new Request.Builder()
 			.url(url)
 			.header("Content-Type", "application/json")
-			.header("X-RuneLite-Key", appKey.trim())
+			.header("X-RuneLite-Key", appKey)
 			.post(RequestBody.create(JSON_MEDIA_TYPE, json))
 			.build();
 
@@ -502,6 +515,7 @@ public class MystixApiClient
 			public void onFailure(Call call, IOException e)
 			{
 				log.warn("Failed to send {} sync to Mystix API: {}", syncType, e.getMessage());
+				recordFailure(appKey);
 			}
 
 			@Override
@@ -509,6 +523,7 @@ public class MystixApiClient
 			{
 				try
 				{
+					recordResponse(appKey, response.code());
 					if (response.code() >= HTTP_OK_MIN && response.code() < HTTP_OK_MAX)
 					{
 						if (dedupe)
@@ -528,6 +543,33 @@ public class MystixApiClient
 				}
 			}
 		});
+	}
+
+	/**
+	 * Reports a response to {@link SyncHealth}, unless the App Key has been
+	 * edited since the request went out: a late 403 for the old key must not
+	 * flag the new one.
+	 */
+	private void recordResponse(String sentKey, int code)
+	{
+		if (isCurrentKey(sentKey))
+		{
+			syncHealth.onResponseCode(code);
+		}
+	}
+
+	private void recordFailure(String sentKey)
+	{
+		if (isCurrentKey(sentKey))
+		{
+			syncHealth.onUnreachable();
+		}
+	}
+
+	private boolean isCurrentKey(String sentKey)
+	{
+		String current = config.mystixAppKey();
+		return current != null && current.trim().equals(sentKey);
 	}
 
 	static boolean isDuplicate(String previousBody, String currentJson)
