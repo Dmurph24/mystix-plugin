@@ -4,17 +4,28 @@ import com.google.gson.Gson;
 import com.mystix.api.MystixApiClient;
 import com.mystix.model.KillCountsSyncPayload;
 import java.util.Map;
+import java.util.Set;
 import java.util.TreeMap;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.function.IntUnaryOperator;
 import javax.inject.Inject;
 import javax.inject.Singleton;
 import lombok.extern.slf4j.Slf4j;
+import net.runelite.api.ChatMessageType;
 import net.runelite.api.Client;
 import net.runelite.api.GameState;
+import net.runelite.api.Player;
+import net.runelite.api.coords.WorldPoint;
 import net.runelite.api.events.GameStateChanged;
 import net.runelite.api.events.GameTick;
+import net.runelite.api.events.VarbitChanged;
+import net.runelite.api.gameval.VarPlayerID;
 import net.runelite.client.callback.ClientThread;
+import net.runelite.client.chat.ChatColorType;
+import net.runelite.client.chat.ChatMessageBuilder;
+import net.runelite.client.chat.ChatMessageManager;
+import net.runelite.client.chat.QueuedMessage;
 import net.runelite.client.config.ConfigManager;
 import net.runelite.client.events.ConfigChanged;
 import net.runelite.client.eventbus.Subscribe;
@@ -33,6 +44,10 @@ import net.runelite.client.eventbus.Subscribe;
  * the config on each kill, firing {@link ConfigChanged}; we mark a re-check and
  * read + dedupe on the next {@link GameTick} (throttled). A JSON equality check
  * means an unchanged set is never resent.
+ *
+ * <p>The game's Doom of Mokhaiotl scoreboard counts (completions per delve level and
+ * the deepest level reached) ride along as extra entries, re-read whenever the game
+ * updates them.
  */
 @Slf4j
 @Singleton
@@ -43,6 +58,19 @@ public class KillCountMonitor {
 	private static final int RESYNC_THROTTLE_TICKS = 3;
 	// killcount keys that aren't boss KCs (Duel Arena win/loss/streak counters).
 	private static final String DUEL_ARENA_PREFIX = "duel arena";
+	// The game's Doom of Mokhaiotl scoreboard counts: completions per delve level (1-8)
+	// and every level completed past 8.
+	private static final int[] DOOM_LEVEL_VARPS = {
+			VarPlayerID.DOM_LEVEL_1_COMPLETIONS, VarPlayerID.DOM_LEVEL_2_COMPLETIONS,
+			VarPlayerID.DOM_LEVEL_3_COMPLETIONS, VarPlayerID.DOM_LEVEL_4_COMPLETIONS,
+			VarPlayerID.DOM_LEVEL_5_COMPLETIONS, VarPlayerID.DOM_LEVEL_6_COMPLETIONS,
+			VarPlayerID.DOM_LEVEL_7_COMPLETIONS, VarPlayerID.DOM_LEVEL_8_COMPLETIONS,
+			VarPlayerID.DOM_LEVEL_8_PLUS_COMPLETIONS};
+	private static final Set<Integer> DOOM_REGIONS = Set.of(5269, 13668, 14180);
+	// The scoreboard counts can arrive a moment after reaching Doom.
+	private static final int DOOM_REMINDER_DELAY_TICKS = 5;
+	static final String DOOM_HISTORY_SYNCED_KEY = "doomHistorySynced";
+	static final String DOOM_REMINDER_MESSAGE = "Open the Doom scoreboard once to sync your delve history to Mystix.";
 
 	private final Client client;
 	private final ClientThread clientThread;
@@ -51,11 +79,14 @@ public class KillCountMonitor {
 	private final ConfigManager configManager;
 	private final ScheduledExecutorService executorService;
 	private final Gson gson;
+	private final ChatMessageManager chatMessageManager;
 
 	private GameState previousGameState = GameState.UNKNOWN;
 	private boolean kcCheckPending;
 	private int lastReadTick = -1;
 	private String lastSyncJson;
+	private boolean doomReminderChecked;
+	private int ticksAtDoom;
 
 	@Inject
 	public KillCountMonitor(
@@ -65,7 +96,8 @@ public class KillCountMonitor {
 			MystixApiClient apiClient,
 			ConfigManager configManager,
 			ScheduledExecutorService executorService,
-			Gson gson) {
+			Gson gson,
+			ChatMessageManager chatMessageManager) {
 		this.client = client;
 		this.clientThread = clientThread;
 		this.config = config;
@@ -73,6 +105,7 @@ public class KillCountMonitor {
 		this.configManager = configManager;
 		this.executorService = executorService;
 		this.gson = gson;
+		this.chatMessageManager = chatMessageManager;
 	}
 
 	/** Invoked after each upload so roadmap progress can be re-read; set by the plugin. */
@@ -94,6 +127,8 @@ public class KillCountMonitor {
 		kcCheckPending = false;
 		lastReadTick = -1;
 		lastSyncJson = null;
+		doomReminderChecked = false;
+		ticksAtDoom = 0;
 	}
 
 	/**
@@ -119,6 +154,10 @@ public class KillCountMonitor {
 			// Logging out: flush final state (this handler runs on the client thread).
 			syncKillCounts();
 		}
+		if (newState == GameState.LOGIN_SCREEN) {
+			doomReminderChecked = false;
+			ticksAtDoom = 0;
+		}
 		previousGameState = newState;
 	}
 
@@ -130,8 +169,18 @@ public class KillCountMonitor {
 		}
 	}
 
+	/** The game updates the Doom scoreboard counts as each delve level is completed. */
+	@Subscribe
+	public void onVarbitChanged(VarbitChanged event) {
+		int varp = event.getVarpId();
+		if (varp >= VarPlayerID.DOM_DEEPEST_LEVEL && varp <= VarPlayerID.DOM_LEVEL_8_PLUS_COMPLETIONS) {
+			kcCheckPending = true;
+		}
+	}
+
 	@Subscribe
 	public void onGameTick(GameTick event) {
+		checkDoomReminder();
 		if (!kcCheckPending) {
 			return;
 		}
@@ -172,6 +221,9 @@ public class KillCountMonitor {
 			}
 		}
 
+		Map<String, Integer> doomDelves = doomDelves(client::getVarpValue);
+		killCounts.putAll(doomDelves);
+
 		if (killCounts.isEmpty()) {
 			return;
 		}
@@ -186,6 +238,72 @@ public class KillCountMonitor {
 		lastSyncJson = json;
 		log.debug("Syncing {} kill counts for player: {}", killCounts.size(), playerUsername);
 		apiClient.sendKillCountsSync(payload);
+		if (!doomDelves.isEmpty() && !isDoomHistorySynced()) {
+			configManager.setRSProfileConfiguration(MystixConfig.CONFIG_GROUP, DOOM_HISTORY_SYNCED_KEY, true);
+		}
 		notifySynced();
+	}
+
+	/**
+	 * The Doom scoreboard counts above zero, keyed "doom delve 1" to "doom delve 8",
+	 * "doom delve 8+" (levels completed past 8) and "doom deepest delve".
+	 */
+	static Map<String, Integer> doomDelves(IntUnaryOperator varps) {
+		Map<String, Integer> delves = new TreeMap<>();
+		for (int i = 0; i < DOOM_LEVEL_VARPS.length; i++) {
+			int completions = varps.applyAsInt(DOOM_LEVEL_VARPS[i]);
+			if (completions > 0) {
+				delves.put("doom delve " + (i < 8 ? String.valueOf(i + 1) : "8+"), completions);
+			}
+		}
+		int deepest = varps.applyAsInt(VarPlayerID.DOM_DEEPEST_LEVEL);
+		if (deepest > 0) {
+			delves.put("doom deepest delve", deepest);
+		}
+		return delves;
+	}
+
+	/**
+	 * Once per login, a few ticks after reaching Doom of Mokhaiotl, asks the player to open
+	 * the scoreboard when it still reads empty and no delve history has been sent before.
+	 */
+	private void checkDoomReminder() {
+		if (doomReminderChecked) {
+			return;
+		}
+		if (!isAtDoom()) {
+			ticksAtDoom = 0;
+			return;
+		}
+		if (++ticksAtDoom < DOOM_REMINDER_DELAY_TICKS || configManager.getRSProfileKey() == null) {
+			return;
+		}
+		doomReminderChecked = true;
+		if (!config.syncKillCounts() || !SyncGuard.hasAppKey(config) || GameModeUtil.isSpecialGameMode(client)) {
+			return;
+		}
+		if (!doomDelves(client::getVarpValue).isEmpty() || isDoomHistorySynced()) {
+			return;
+		}
+		chatMessageManager.queue(QueuedMessage.builder()
+				.type(ChatMessageType.CONSOLE)
+				.runeLiteFormattedMessage(new ChatMessageBuilder()
+						.append(ChatColorType.HIGHLIGHT)
+						.append(DOOM_REMINDER_MESSAGE)
+						.build())
+				.build());
+	}
+
+	private boolean isDoomHistorySynced() {
+		return Boolean.TRUE.equals(configManager.getRSProfileConfiguration(
+				MystixConfig.CONFIG_GROUP, DOOM_HISTORY_SYNCED_KEY, Boolean.class));
+	}
+
+	private boolean isAtDoom() {
+		Player local = client.getLocalPlayer();
+		if (local == null || local.getLocalLocation() == null) {
+			return false;
+		}
+		return DOOM_REGIONS.contains(WorldPoint.fromLocalInstance(client, local.getLocalLocation()).getRegionID());
 	}
 }
