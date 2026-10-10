@@ -13,6 +13,7 @@ import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -29,6 +30,7 @@ import net.runelite.api.ItemComposition;
 import net.runelite.api.NPC;
 import net.runelite.api.WorldView;
 import net.runelite.api.events.GameStateChanged;
+import net.runelite.api.events.VarbitChanged;
 import net.runelite.client.callback.ClientThread;
 import net.runelite.client.config.ConfigManager;
 import net.runelite.client.eventbus.Subscribe;
@@ -47,6 +49,10 @@ public class LootMonitor
 	private static final String LOOT_TRACKER_CONFIG_GROUP = "loottracker";
 	private static final String LOOT_TRACKER_DROPS_PREFIX = "drops_";
 	private static final String LAST_SYNC_HASH_KEY = "lootSyncHash";
+	/** Moons defeated since the Lunar Chest was last opened; the chest's reward grows with each. */
+	private static final Map<String, int[]> CONTEXT_VARBITS = Map.of("Lunar Chest", new int[]{9858, 9859, 9860});
+	/** The Lunar Chest resets the moons on the same tick its reward loads, so a value cleared this recently still counts. */
+	private static final int CONTEXT_VARBIT_GRACE_TICKS = 5;
 
 	private final Client client;
 	private final MystixConfig config;
@@ -66,6 +72,9 @@ public class LootMonitor
 	private final List<LootDropPayload> pendingDrops = new ArrayList<>();
 	/** Caches NPC name -> NPC ID from NpcLootReceived events (fires before LootReceived). */
 	private final Map<String, Integer> recentNpcIds = new LinkedHashMap<>();
+	/** Current value of each context varbit, and its last non-zero value with the tick it was cleared. */
+	private final Map<Integer, Integer> contextVarbitValues = new HashMap<>();
+	private final Map<Integer, int[]> clearedContextVarbits = new HashMap<>();
 	private ScheduledFuture<?> flushTask;
 	/** Uploads a notable drop right away instead of waiting for the next timed flush. */
 	private final NotableLootFlusher notableFlusher;
@@ -229,6 +238,51 @@ public class LootMonitor
 	}
 
 	@Subscribe
+	public void onVarbitChanged(VarbitChanged event)
+	{
+		int varbit = event.getVarbitId();
+		if (!isContextVarbit(varbit))
+		{
+			return;
+		}
+		Integer previous = contextVarbitValues.put(varbit, event.getValue());
+		if (event.getValue() == 0 && previous != null && previous != 0)
+		{
+			clearedContextVarbits.put(varbit, new int[]{previous, client.getTickCount()});
+		}
+	}
+
+	private static boolean isContextVarbit(int varbit)
+	{
+		for (int[] ids : CONTEXT_VARBITS.values())
+		{
+			for (int id : ids)
+			{
+				if (id == varbit)
+				{
+					return true;
+				}
+			}
+		}
+		return false;
+	}
+
+	private int contextVarbitValue(int varbit)
+	{
+		return heldVarbitValue(client.getVarbitValue(varbit), clearedContextVarbits.get(varbit), client.getTickCount());
+	}
+
+	/** The current value, or the value cleared within the grace ticks ({value, tick}) when it reads 0 now. */
+	static int heldVarbitValue(int current, int[] cleared, int tick)
+	{
+		if (current == 0 && cleared != null && tick - cleared[1] <= CONTEXT_VARBIT_GRACE_TICKS)
+		{
+			return cleared[0];
+		}
+		return current;
+	}
+
+	@Subscribe
 	public void onLootReceived(LootReceived event)
 	{
 		if (event.getType() != LootRecordType.NPC && event.getType() != LootRecordType.EVENT)
@@ -289,8 +343,26 @@ public class LootMonitor
 			return;
 		}
 
+		Map<String, Object> context = new LinkedHashMap<>();
+		Object metadata = event.getMetadata();
+		if (metadata instanceof Integer || metadata instanceof int[])
+		{
+			context.put("metadata", metadata);
+		}
+		int[] varbits = CONTEXT_VARBITS.get(npcName);
+		if (varbits != null)
+		{
+			Map<String, Integer> values = new LinkedHashMap<>();
+			for (int varbit : varbits)
+			{
+				values.put(String.valueOf(varbit), contextVarbitValue(varbit));
+			}
+			context.put("varbits", values);
+		}
+
 		String droppedAt = DateTimeFormatter.ISO_INSTANT.format(Instant.now().atOffset(ZoneOffset.UTC));
-		LootDropPayload payload = new LootDropPayload(playerUsername, clientId, npcId, npcName, killCount, droppedAt, items);
+		LootDropPayload payload = new LootDropPayload(playerUsername, clientId, npcId, npcName, killCount, droppedAt, items,
+			context.isEmpty() ? null : context);
 		log.debug("Loot drop from {} (id={}, kc={}): {} items (queued)", npcName, npcId, killCount, items.size());
 
 		synchronized (pendingDrops)

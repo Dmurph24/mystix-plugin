@@ -5,6 +5,8 @@ import com.mystix.MystixConfig;
 import com.mystix.SyncHealth;
 import com.mystix.TestMystixConfig;
 import com.mystix.model.BankSyncPayload;
+import com.mystix.model.LootDropPayload;
+import com.mystix.model.LootSyncPayload;
 import com.mystix.model.PlayerSkillsSyncPayload;
 import com.mystix.model.Roadmap;
 import com.mystix.model.RoadmapList;
@@ -14,6 +16,7 @@ import java.time.Instant;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
@@ -24,6 +27,7 @@ import okhttp3.Protocol;
 import okhttp3.Request;
 import okhttp3.Response;
 import okhttp3.ResponseBody;
+import okio.Buffer;
 import org.junit.Test;
 
 import static org.junit.Assert.assertEquals;
@@ -284,5 +288,46 @@ public class MystixApiClientTest {
 	@Test
 	public void pluginVersionIsHeaderSafe() {
 		assertTrue(MystixApiClient.PLUGIN_VERSION.matches("[0-9A-Za-z._-]{1,32}"));
+	}
+
+	private static String sentLootDropsBody(LootDropPayload... drops) throws Exception {
+		AtomicReference<Request> sent = new AtomicReference<>();
+		CountDownLatch done = new CountDownLatch(1);
+		MystixApiClient client = new MystixApiClient(keyed("test-key"), new Gson(), recordingClient(sent, done));
+		client.sendLootDrops(Arrays.asList(drops));
+		assertTrue(done.await(5, TimeUnit.SECONDS));
+		Buffer body = new Buffer();
+		sent.get().body().writeTo(body);
+		return body.readUtf8();
+	}
+
+	private static LootDropPayload drop(String npcName, Map<String, Object> context) {
+		return new LootDropPayload("Zezima", "client-1", 1, npcName, 1, "2026-10-10T00:00:00Z",
+				Collections.singletonList(new LootSyncPayload.LootItem(995, 100)), context);
+	}
+
+	@Test
+	public void lootDropContextIsSentOnlyWhenPresent() throws Exception {
+		Map<String, Integer> varbits = new LinkedHashMap<>();
+		varbits.put("9858", 1);
+		varbits.put("9859", 0);
+		varbits.put("9860", 1);
+		Map<String, Object> varbitContext = new LinkedHashMap<>();
+		varbitContext.put("varbits", varbits);
+		Map<String, Object> intMetadata = new LinkedHashMap<>();
+		intMetadata.put("metadata", 7);
+		Map<String, Object> arrayMetadata = new LinkedHashMap<>();
+		arrayMetadata.put("metadata", new int[]{3, 4});
+
+		String json = sentLootDropsBody(drop("Lunar Chest", varbitContext), drop("Chest A", intMetadata),
+				drop("Chest B", arrayMetadata), drop("Goblin", null));
+
+		assertTrue(json, json.contains("\"npc_name\":\"Lunar Chest\",\"kill_count\":1,"
+				+ "\"dropped_at\":\"2026-10-10T00:00:00Z\",\"items\":[{\"item_id\":995,\"quantity\":100}],"
+				+ "\"context\":{\"varbits\":{\"9858\":1,\"9859\":0,\"9860\":1}}}"));
+		assertTrue(json, json.contains("\"context\":{\"metadata\":7}"));
+		assertTrue(json, json.contains("\"context\":{\"metadata\":[3,4]}"));
+		String goblin = json.substring(json.indexOf("\"npc_name\":\"Goblin\""));
+		assertFalse(json, goblin.contains("context"));
 	}
 }
