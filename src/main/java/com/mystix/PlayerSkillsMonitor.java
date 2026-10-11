@@ -22,15 +22,15 @@ import net.runelite.client.eventbus.Subscribe;
 
 /**
  * Uploads skill levels and XP: on login, on logout, and while training (at most
- * every {@link #TRAINING_SYNC_INTERVAL_SECONDS} while XP is actually rising) so
- * the server can keep roadmap skill goals current without waiting for logout.
+ * once per the server's sync interval while XP is actually rising) so the
+ * server can keep roadmap skill goals current without waiting for logout.
  */
 @Slf4j
 @Singleton
 public class PlayerSkillsMonitor {
 	private static final int LOGIN_SYNC_DELAY_SECONDS = 3;
-	/** How often to re-upload while training; nothing is sent when XP is static. */
-	static final int TRAINING_SYNC_INTERVAL_SECONDS = 120;
+	/** How often to check for a training re-upload; nothing is sent when XP is static. */
+	static final int TRAINING_SYNC_INTERVAL_SECONDS = 60;
 
 	private final Client client;
 	private final MystixConfig config;
@@ -41,6 +41,7 @@ public class PlayerSkillsMonitor {
 	/** Last XP seen per skill (client thread); the first value after login is the replay. */
 	private final Map<String, Integer> lastSeenXp = new HashMap<>();
 	private volatile boolean xpDirty;
+	private volatile long lastSyncMillis;
 	private ScheduledFuture<?> trainingTask;
 	/** The XP snapshot of the last upload the server acknowledged, keyed by skill name. */
 	private volatile Map<String, Integer> lastUploadedXp = Collections.emptyMap();
@@ -128,6 +129,9 @@ public class PlayerSkillsMonitor {
 		if (!xpDirty || client.getGameState() != GameState.LOGGED_IN) {
 			return;
 		}
+		if (System.currentTimeMillis() - lastSyncMillis < apiClient.getSyncIntervalSeconds() * 1000L) {
+			return;
+		}
 		xpDirty = false;
 		syncPlayerSkills();
 	}
@@ -168,6 +172,7 @@ public class PlayerSkillsMonitor {
 		int combatLevel = localPlayer.getCombatLevel();
 
 		PlayerSkillsSyncPayload payload = new PlayerSkillsSyncPayload(playerUsername, skills, totalLevel, combatLevel);
+		lastSyncMillis = System.currentTimeMillis();
 		log.debug("Syncing {} skills for player: {} (Total Level: {}, Combat Level: {})",
 				skills.size(), playerUsername, totalLevel, combatLevel);
 		Map<String, Integer> snapshot = Collections.unmodifiableMap(xpSnapshot);
