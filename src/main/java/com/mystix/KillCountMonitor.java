@@ -7,6 +7,7 @@ import java.util.Map;
 import java.util.TreeMap;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.function.IntUnaryOperator;
 import javax.inject.Inject;
 import javax.inject.Singleton;
 import lombok.extern.slf4j.Slf4j;
@@ -14,6 +15,8 @@ import net.runelite.api.Client;
 import net.runelite.api.GameState;
 import net.runelite.api.events.GameStateChanged;
 import net.runelite.api.events.GameTick;
+import net.runelite.api.events.VarbitChanged;
+import net.runelite.api.gameval.VarPlayerID;
 import net.runelite.client.callback.ClientThread;
 import net.runelite.client.config.ConfigManager;
 import net.runelite.client.events.ConfigChanged;
@@ -33,6 +36,10 @@ import net.runelite.client.eventbus.Subscribe;
  * the config on each kill, firing {@link ConfigChanged}; we mark a re-check and
  * read + dedupe on the next {@link GameTick} (throttled). A JSON equality check
  * means an unchanged set is never resent.
+ *
+ * <p>The game's Doom of Mokhaiotl scoreboard counts (completions per delve level and
+ * the deepest level reached) ride along as extra entries. The game sends them at login
+ * and updates them as each delve level is completed, which marks a re-check like a kill.
  */
 @Slf4j
 @Singleton
@@ -43,6 +50,14 @@ public class KillCountMonitor {
 	private static final int RESYNC_THROTTLE_TICKS = 3;
 	// killcount keys that aren't boss KCs (Duel Arena win/loss/streak counters).
 	private static final String DUEL_ARENA_PREFIX = "duel arena";
+	// The game's Doom of Mokhaiotl scoreboard counts: completions per delve level (1-8)
+	// and every level completed past 8.
+	private static final int[] DOOM_LEVEL_VARPS = {
+			VarPlayerID.DOM_LEVEL_1_COMPLETIONS, VarPlayerID.DOM_LEVEL_2_COMPLETIONS,
+			VarPlayerID.DOM_LEVEL_3_COMPLETIONS, VarPlayerID.DOM_LEVEL_4_COMPLETIONS,
+			VarPlayerID.DOM_LEVEL_5_COMPLETIONS, VarPlayerID.DOM_LEVEL_6_COMPLETIONS,
+			VarPlayerID.DOM_LEVEL_7_COMPLETIONS, VarPlayerID.DOM_LEVEL_8_COMPLETIONS,
+			VarPlayerID.DOM_LEVEL_8_PLUS_COMPLETIONS};
 
 	private final Client client;
 	private final ClientThread clientThread;
@@ -130,6 +145,15 @@ public class KillCountMonitor {
 		}
 	}
 
+	/** The game updates the Doom scoreboard counts as each delve level is completed. */
+	@Subscribe
+	public void onVarbitChanged(VarbitChanged event) {
+		int varp = event.getVarpId();
+		if (varp >= VarPlayerID.DOM_DEEPEST_LEVEL && varp <= VarPlayerID.DOM_LEVEL_8_PLUS_COMPLETIONS) {
+			kcCheckPending = true;
+		}
+	}
+
 	@Subscribe
 	public void onGameTick(GameTick event) {
 		if (!kcCheckPending) {
@@ -172,6 +196,8 @@ public class KillCountMonitor {
 			}
 		}
 
+		killCounts.putAll(doomDelves(client::getVarpValue));
+
 		if (killCounts.isEmpty()) {
 			return;
 		}
@@ -187,5 +213,24 @@ public class KillCountMonitor {
 		log.debug("Syncing {} kill counts for player: {}", killCounts.size(), playerUsername);
 		apiClient.sendKillCountsSync(payload);
 		notifySynced();
+	}
+
+	/**
+	 * The Doom scoreboard counts above zero, keyed "doom delve 1" to "doom delve 8",
+	 * "doom delve 8+" (levels completed past 8) and "doom deepest delve".
+	 */
+	static Map<String, Integer> doomDelves(IntUnaryOperator varps) {
+		Map<String, Integer> delves = new TreeMap<>();
+		for (int i = 0; i < DOOM_LEVEL_VARPS.length; i++) {
+			int completions = varps.applyAsInt(DOOM_LEVEL_VARPS[i]);
+			if (completions > 0) {
+				delves.put("doom delve " + (i < 8 ? String.valueOf(i + 1) : "8+"), completions);
+			}
+		}
+		int deepest = varps.applyAsInt(VarPlayerID.DOM_DEEPEST_LEVEL);
+		if (deepest > 0) {
+			delves.put("doom deepest delve", deepest);
+		}
+		return delves;
 	}
 }
