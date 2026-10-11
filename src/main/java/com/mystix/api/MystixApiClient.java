@@ -67,6 +67,9 @@ public class MystixApiClient
 		chain.request().newBuilder().header(VERSION_HEADER, PLUGIN_VERSION).build());
 	private static final String TIMERS_ENDPOINT = "/api/runelite/timers/";
 	private static final String SKILLS_ENDPOINT = "/api/runelite/skills/";
+	/** How often the server wants skills pushed while training, in seconds. */
+	static final String SYNC_INTERVAL_HEADER = "X-Mystix-Sync-Interval";
+	private volatile int syncIntervalSeconds = 120;
 	private static final String BANK_ENDPOINT = "/api/runelite/bank/";
 	private static final String COLLECTION_LOG_ENDPOINT = "/api/runelite/collection-log/";
 	private static final String QUESTS_ENDPOINT = "/api/runelite/quests/";
@@ -131,6 +134,11 @@ public class MystixApiClient
 		String json = TimersSyncPayload.toJson(timers);
 		postAsync(TIMERS_ENDPOINT, json, "timers", false, true,
 			() -> log.debug("Mystix timers sync successful: {} timers", timers.size()));
+	}
+
+	public int getSyncIntervalSeconds()
+	{
+		return syncIntervalSeconds;
 	}
 
 	public void sendPlayerSkillsSync(PlayerSkillsSyncPayload payload)
@@ -533,6 +541,17 @@ public class MystixApiClient
 						if (dedupe)
 						{
 							lastSentBodyByType.put(syncType, json);
+						}
+						String interval = response.header(SYNC_INTERVAL_HEADER);
+						if (interval != null)
+						{
+							try
+							{
+								syncIntervalSeconds = Math.max(60, Math.min(1800, Integer.parseInt(interval.trim())));
+							}
+							catch (NumberFormatException ignored)
+							{
+							}
 						}
 						onSuccess.run();
 					}
