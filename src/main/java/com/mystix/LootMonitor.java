@@ -21,6 +21,7 @@ import java.util.UUID;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
+import java.util.function.IntUnaryOperator;
 import javax.inject.Inject;
 import javax.inject.Singleton;
 import lombok.extern.slf4j.Slf4j;
@@ -49,9 +50,16 @@ public class LootMonitor
 	private static final String LOOT_TRACKER_CONFIG_GROUP = "loottracker";
 	private static final String LOOT_TRACKER_DROPS_PREFIX = "drops_";
 	private static final String LAST_SYNC_HASH_KEY = "lootSyncHash";
-	/** Moons defeated since the Lunar Chest was last opened; the chest's reward grows with each. */
-	private static final Map<String, int[]> CONTEXT_VARBITS = Map.of("Lunar Chest", new int[]{9858, 9859, 9860});
-	/** The Lunar Chest resets the moons on the same tick its reward loads, so a value cleared this recently still counts. */
+	/**
+	 * Moons defeated since the Lunar Chest was last opened, whose reward grows with each; and whether the
+	 * purple sarcophagus is lit in the Tombs of Amascut vault.
+	 */
+	private static final Map<String, int[]> CONTEXT_VARBITS = Map.of(
+		"Lunar Chest", new int[]{9858, 9859, 9860},
+		"Tombs of Amascut", new int[]{14373});
+	/** Personal raid points at the end of a Tombs of Amascut raid, which the game later resets to 0. */
+	private static final Map<String, int[]> CONTEXT_VARPS = Map.of("Tombs of Amascut", new int[]{3606});
+	/** A reward can reset these on the same tick it loads (the Lunar Chest's moons do), so a value cleared this recently still counts. */
 	private static final int CONTEXT_VARBIT_GRACE_TICKS = 5;
 
 	private final Client client;
@@ -72,9 +80,11 @@ public class LootMonitor
 	private final List<LootDropPayload> pendingDrops = new ArrayList<>();
 	/** Caches NPC name -> NPC ID from NpcLootReceived events (fires before LootReceived). */
 	private final Map<String, Integer> recentNpcIds = new LinkedHashMap<>();
-	/** Current value of each context varbit, and its last non-zero value with the tick it was cleared. */
+	/** Current value of each context varbit and varp, and its last non-zero value with the tick it was cleared. */
 	private final Map<Integer, Integer> contextVarbitValues = new HashMap<>();
 	private final Map<Integer, int[]> clearedContextVarbits = new HashMap<>();
+	private final Map<Integer, Integer> contextVarpValues = new HashMap<>();
+	private final Map<Integer, int[]> clearedContextVarps = new HashMap<>();
 	private ScheduledFuture<?> flushTask;
 	/** Uploads a notable drop right away instead of waiting for the next timed flush. */
 	private final NotableLootFlusher notableFlusher;
@@ -240,25 +250,26 @@ public class LootMonitor
 	@Subscribe
 	public void onVarbitChanged(VarbitChanged event)
 	{
-		int varbit = event.getVarbitId();
-		if (!isContextVarbit(varbit))
+		boolean varp = event.getVarbitId() == -1;
+		int id = varp ? event.getVarpId() : event.getVarbitId();
+		if (!isContextId(varp ? CONTEXT_VARPS : CONTEXT_VARBITS, id))
 		{
 			return;
 		}
-		Integer previous = contextVarbitValues.put(varbit, event.getValue());
+		Integer previous = (varp ? contextVarpValues : contextVarbitValues).put(id, event.getValue());
 		if (event.getValue() == 0 && previous != null && previous != 0)
 		{
-			clearedContextVarbits.put(varbit, new int[]{previous, client.getTickCount()});
+			(varp ? clearedContextVarps : clearedContextVarbits).put(id, new int[]{previous, client.getTickCount()});
 		}
 	}
 
-	private static boolean isContextVarbit(int varbit)
+	private static boolean isContextId(Map<String, int[]> table, int contextId)
 	{
-		for (int[] ids : CONTEXT_VARBITS.values())
+		for (int[] ids : table.values())
 		{
 			for (int id : ids)
 			{
-				if (id == varbit)
+				if (id == contextId)
 				{
 					return true;
 				}
@@ -272,6 +283,11 @@ public class LootMonitor
 		return heldVarbitValue(client.getVarbitValue(varbit), clearedContextVarbits.get(varbit), client.getTickCount());
 	}
 
+	private int contextVarpValue(int varp)
+	{
+		return heldVarbitValue(client.getVarpValue(varp), clearedContextVarps.get(varp), client.getTickCount());
+	}
+
 	/** The current value, or the value cleared within the grace ticks ({value, tick}) when it reads 0 now. */
 	static int heldVarbitValue(int current, int[] cleared, int tick)
 	{
@@ -280,6 +296,21 @@ public class LootMonitor
 			return cleared[0];
 		}
 		return current;
+	}
+
+	/** Adds {"<id>": value} under the key for each id read, when the source has any. */
+	static void putContextValues(Map<String, Object> context, String key, int[] ids, IntUnaryOperator read)
+	{
+		if (ids == null)
+		{
+			return;
+		}
+		Map<String, Integer> values = new LinkedHashMap<>();
+		for (int id : ids)
+		{
+			values.put(String.valueOf(id), read.applyAsInt(id));
+		}
+		context.put(key, values);
 	}
 
 	@Subscribe
@@ -349,21 +380,13 @@ public class LootMonitor
 		{
 			context.put("metadata", metadata);
 		}
-		int[] varbits = CONTEXT_VARBITS.get(npcName);
-		if (varbits != null)
-		{
-			Map<String, Integer> values = new LinkedHashMap<>();
-			for (int varbit : varbits)
-			{
-				values.put(String.valueOf(varbit), contextVarbitValue(varbit));
-			}
-			context.put("varbits", values);
-		}
+		putContextValues(context, "varbits", CONTEXT_VARBITS.get(npcName), this::contextVarbitValue);
+		putContextValues(context, "varps", CONTEXT_VARPS.get(npcName), this::contextVarpValue);
 
 		String droppedAt = DateTimeFormatter.ISO_INSTANT.format(Instant.now().atOffset(ZoneOffset.UTC));
 		LootDropPayload payload = new LootDropPayload(playerUsername, clientId, npcId, npcName, killCount, droppedAt, items,
 			context.isEmpty() ? null : context);
-		log.debug("Loot drop from {} (id={}, kc={}): {} items (queued)", npcName, npcId, killCount, items.size());
+		log.debug("Loot drop from {} (id={}, kc={}): {} items, context {} (queued)", npcName, npcId, killCount, items.size(), gson.toJson(context));
 
 		synchronized (pendingDrops)
 		{
