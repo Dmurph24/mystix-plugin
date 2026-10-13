@@ -51,14 +51,18 @@ public class LootMonitor
 	private static final String LOOT_TRACKER_DROPS_PREFIX = "drops_";
 	private static final String LAST_SYNC_HASH_KEY = "lootSyncHash";
 	/**
-	 * Moons defeated since the Lunar Chest was last opened, whose reward grows with each; and whether the
-	 * purple sarcophagus is lit in the Tombs of Amascut vault.
+	 * Moons defeated since the Lunar Chest was last opened, whose reward grows with each; whether the
+	 * purple sarcophagus is lit in the Tombs of Amascut vault; and the Chambers of Xeric team's points,
+	 * party size and Challenge Mode flag.
 	 */
 	private static final Map<String, int[]> CONTEXT_VARBITS = Map.of(
 		"Lunar Chest", new int[]{9858, 9859, 9860},
-		"Tombs of Amascut", new int[]{14373});
-	/** Personal raid points at the end of a Tombs of Amascut raid, which the game later resets to 0. */
-	private static final Map<String, int[]> CONTEXT_VARPS = Map.of("Tombs of Amascut", new int[]{3606});
+		"Tombs of Amascut", new int[]{14373},
+		"Chambers of Xeric", new int[]{5431, 5424, 6385});
+	/** Personal raid points at the end of a Tombs of Amascut or Chambers of Xeric raid, which the game later resets to 0. */
+	private static final Map<String, int[]> CONTEXT_VARPS = Map.of(
+		"Tombs of Amascut", new int[]{3606},
+		"Chambers of Xeric", new int[]{4609});
 	/** A reward can reset these on the same tick it loads (the Lunar Chest's moons do), so a value cleared this recently still counts. */
 	private static final int CONTEXT_VARBIT_GRACE_TICKS = 5;
 

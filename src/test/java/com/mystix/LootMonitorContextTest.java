@@ -42,4 +42,16 @@ public class LootMonitorContextTest
 		assertEquals("{\"metadata\":[300,3,12345],\"varbits\":{\"14373\":1},\"varps\":{\"3606\":18234}}",
 			new Gson().toJson(context));
 	}
+
+	@Test
+	public void chambersOfXericContextCarriesTeamVarbitsAndPointsVarp()
+	{
+		Map<String, Object> context = new LinkedHashMap<>();
+		Map<Integer, Integer> varbits = Map.of(5431, 120000, 5424, 3, 6385, 1);
+		LootMonitor.putContextValues(context, "varbits", new int[]{5431, 5424, 6385}, varbits::get);
+		LootMonitor.putContextValues(context, "varps", new int[]{4609}, id -> 41000);
+
+		assertEquals("{\"varbits\":{\"5431\":120000,\"5424\":3,\"6385\":1},\"varps\":{\"4609\":41000}}",
+			new Gson().toJson(context));
+	}
 }
