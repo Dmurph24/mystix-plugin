@@ -27,10 +27,14 @@ import javax.inject.Singleton;
 import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.Client;
 import net.runelite.api.GameState;
+import net.runelite.api.Hitsplat;
+import net.runelite.api.HitsplatID;
 import net.runelite.api.ItemComposition;
 import net.runelite.api.NPC;
 import net.runelite.api.WorldView;
 import net.runelite.api.events.GameStateChanged;
+import net.runelite.api.events.HitsplatApplied;
+import net.runelite.api.events.NpcSpawned;
 import net.runelite.api.events.VarbitChanged;
 import net.runelite.client.callback.ClientThread;
 import net.runelite.client.config.ConfigManager;
@@ -89,6 +93,7 @@ public class LootMonitor
 	private final Map<Integer, int[]> clearedContextVarbits = new HashMap<>();
 	private final Map<Integer, Integer> contextVarpValues = new HashMap<>();
 	private final Map<Integer, int[]> clearedContextVarps = new HashMap<>();
+	private final YamaDamageTracker yamaDamage = new YamaDamageTracker();
 	private ScheduledFuture<?> flushTask;
 	/** Uploads a notable drop right away instead of waiting for the next timed flush. */
 	private final NotableLootFlusher notableFlusher;
@@ -182,6 +187,7 @@ public class LootMonitor
 		previousGameState = GameState.UNKNOWN;
 		sessionKillCounts.clear();
 		recentNpcIds.clear();
+		yamaDamage.reset();
 		lastSyncHash = null;
 	}
 
@@ -229,6 +235,7 @@ public class LootMonitor
 		else if (previousGameState == GameState.LOGGED_IN && newState != GameState.LOGGED_IN)
 		{
 			log.debug("Player logged out, flushing pending drops and syncing loot");
+			yamaDamage.reset();
 			flushDrops();
 			syncLoot();
 		}
@@ -249,6 +256,31 @@ public class LootMonitor
 		{
 			recentNpcIds.put(npc.getName(), npc.getId());
 		}
+	}
+
+	@Subscribe
+	public void onNpcSpawned(NpcSpawned event)
+	{
+		yamaDamage.onNpcSpawned(event.getNpc().getName(), client.getTickCount());
+	}
+
+	@Subscribe
+	public void onHitsplatApplied(HitsplatApplied event)
+	{
+		if (!(event.getActor() instanceof NPC))
+		{
+			return;
+		}
+		Hitsplat hitsplat = event.getHitsplat();
+		yamaDamage.onHitsplat(event.getActor().getName(), hitsplat.getAmount(),
+			hitsplat.getHitsplatType() == HitsplatID.HEAL, hitsplat.isMine(), hitsplat.isOthers(),
+			this::playersInScene, client.getTickCount());
+	}
+
+	private int playersInScene()
+	{
+		WorldView view = client.getTopLevelWorldView();
+		return view == null ? 0 : (int) view.players().stream().count();
 	}
 
 	@Subscribe
@@ -324,6 +356,7 @@ public class LootMonitor
 		{
 			return;
 		}
+		Map<String, Object> yamaDamageDealt = YamaDamageTracker.YAMA.equals(event.getName()) ? yamaDamage.finish() : null;
 		if (!config.syncLoot())
 		{
 			return;
@@ -386,6 +419,10 @@ public class LootMonitor
 		}
 		putContextValues(context, "varbits", CONTEXT_VARBITS.get(npcName), this::contextVarbitValue);
 		putContextValues(context, "varps", CONTEXT_VARPS.get(npcName), this::contextVarpValue);
+		if (yamaDamageDealt != null)
+		{
+			context.put("yama", yamaDamageDealt);
+		}
 
 		String droppedAt = DateTimeFormatter.ISO_INSTANT.format(Instant.now().atOffset(ZoneOffset.UTC));
 		LootDropPayload payload = new LootDropPayload(playerUsername, clientId, npcId, npcName, killCount, droppedAt, items,
