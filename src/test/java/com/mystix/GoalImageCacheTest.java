@@ -32,6 +32,9 @@ public class GoalImageCacheTest {
 	public void onlyAllowedImageSourcesAreFetched() {
 		assertTrue(GoalImageCache.isAllowed("https://oldschool.runescape.wiki/images/Zulrah.png"));
 		assertTrue(GoalImageCache.isAllowed("https://oldschool.runescape.wiki/images/Attack_icon.png?7d0d4"));
+		assertTrue(GoalImageCache.isAllowed("https://media.mystix.app/game-images/items/12922.png"));
+		assertTrue(GoalImageCache.isAllowed("https://media.mystix.app/game-images/items/995_x10000.png"));
+		assertTrue(GoalImageCache.isAllowed("https://media.mystix.app/game-images/sprites/197.png"));
 		assertTrue(GoalImageCache.isAllowed("https://media.mystix.app/wiki-images/Zulrah.png"));
 		assertTrue(GoalImageCache.isAllowed("https://media.mystix.app/wiki-images/Zulrah%27s_scales.png"));
 		// Exactly as the API builds them: quotes and parentheses left as is, "+" escaped.
@@ -50,6 +53,9 @@ public class GoalImageCacheTest {
 		// Each host only serves its own path: no wiki paths on the Mystix host, and back.
 		assertFalse(GoalImageCache.isAllowed("https://media.mystix.app/images/Zulrah.png"));
 		assertFalse(GoalImageCache.isAllowed("https://oldschool.runescape.wiki/wiki-images/Zulrah.png"));
+		assertFalse(GoalImageCache.isAllowed("https://oldschool.runescape.wiki/game-images/items/12922.png"));
+		assertFalse(GoalImageCache.isAllowed("https://media.mystix.app/game-images/../poll_options/x.png"));
+		assertFalse(GoalImageCache.isAllowed("https://media.mystix.app/game-imagesX/items/1.png"));
 		assertFalse(GoalImageCache.isAllowed("https://media.mystix.app/poll-images/1.png"));
 		assertFalse(GoalImageCache.isAllowed("https://media.mystix.app/wiki-images/../uploads/x.png"));
 		assertFalse(GoalImageCache.isAllowed("http://media.mystix.app/wiki-images/Zulrah.png"));
