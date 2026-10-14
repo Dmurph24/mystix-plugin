@@ -29,9 +29,21 @@ public class GoalImageCacheTest {
 	}
 
 	@Test
-	public void onlyWikiImagesAreFetched() {
+	public void onlyAllowedImageSourcesAreFetched() {
 		assertTrue(GoalImageCache.isAllowed("https://oldschool.runescape.wiki/images/Zulrah.png"));
 		assertTrue(GoalImageCache.isAllowed("https://oldschool.runescape.wiki/images/Attack_icon.png?7d0d4"));
+		assertTrue(GoalImageCache.isAllowed("https://media.mystix.app/game-images/items/12922.png"));
+		assertTrue(GoalImageCache.isAllowed("https://media.mystix.app/game-images/items/995_x10000.png"));
+		assertTrue(GoalImageCache.isAllowed("https://media.mystix.app/game-images/sprites/197.png"));
+		assertTrue(GoalImageCache.isAllowed("https://media.mystix.app/wiki-images/Zulrah.png"));
+		assertTrue(GoalImageCache.isAllowed("https://media.mystix.app/wiki-images/Zulrah%27s_scales.png"));
+		// Exactly as the API builds them: quotes and parentheses left as is, "+" escaped.
+		assertTrue(GoalImageCache.isAllowed("https://media.mystix.app/wiki-images/Zulrah's_scales_5.png"));
+		assertTrue(GoalImageCache.isAllowed("https://media.mystix.app/wiki-images/Skull_(status)_icon.png"));
+		assertTrue(GoalImageCache.isAllowed("https://media.mystix.app/wiki-images/Anti-venom%2B(4).png"));
+		// Anything on the Mystix media host.
+		assertTrue(GoalImageCache.isAllowed("https://media.mystix.app/poll_options/Zulrah.webp"));
+		assertTrue(GoalImageCache.isAllowed("https://media.mystix.app/Zulrah.png"));
 
 		assertFalse(GoalImageCache.isAllowed(null));
 		assertFalse(GoalImageCache.isAllowed(""));
@@ -41,5 +53,14 @@ public class GoalImageCacheTest {
 		assertFalse(GoalImageCache.isAllowed("https://oldschool.runescape.wiki@example.com/images/Zulrah.png"));
 		assertFalse(GoalImageCache.isAllowed("https://oldschool.runescape.wiki:8443/images/Zulrah.png"));
 		assertFalse(GoalImageCache.isAllowed("https://oldschool.runescape.wiki/w/Zulrah"));
+		// The wiki still only for its images.
+		assertFalse(GoalImageCache.isAllowed("https://oldschool.runescape.wiki/wiki-images/Zulrah.png"));
+		assertFalse(GoalImageCache.isAllowed("https://oldschool.runescape.wiki/game-images/items/12922.png"));
+		assertFalse(GoalImageCache.isAllowed("http://media.mystix.app/wiki-images/Zulrah.png"));
+		assertFalse(GoalImageCache.isAllowed("https://media.mystix.app:8443/wiki-images/Zulrah.png"));
+		assertFalse(GoalImageCache.isAllowed("https://media.mystix.app.example.com/wiki-images/Zulrah.png"));
+		assertFalse(GoalImageCache.isAllowed("https://d1234abcd.cloudfront.net/wiki-images/Zulrah.png"));
+		assertFalse(GoalImageCache.isAllowed("https://evil.media.mystix.app/Zulrah.png"));
+		assertFalse(GoalImageCache.isAllowed("https://mystix.app/Zulrah.png"));
 	}
 }
