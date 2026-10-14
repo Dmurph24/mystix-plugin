@@ -102,4 +102,20 @@ public class NotableLootFlusherTest {
 		executor.runDue(60_000);
 		assertEquals(1, flushes);
 	}
+
+	@Test
+	public void testPricePastMaxCashIsNotable() {
+		// RuneLite 1.13 returns GE prices as long: a 3B item (3rd age druidic cloak).
+		assertTrue(NotableLootFlusher.isNotable(SOME_ITEM, 1, 3_000_000_000L, true));
+		assertTrue(NotableLootFlusher.isNotable(SOME_ITEM, Integer.MAX_VALUE, 3_000_000_000L, true));
+	}
+
+	@Test
+	public void testHugePriceTimesQuantityCannotOverflow() {
+		// price * quantity would wrap a long here; the division-based check cannot.
+		assertTrue(NotableLootFlusher.isNotable(SOME_ITEM, 5_000_000_000L, Long.MAX_VALUE / 2, true));
+		assertTrue(NotableLootFlusher.isNotable(SOME_ITEM, Long.MAX_VALUE, Long.MAX_VALUE, true));
+		assertFalse(NotableLootFlusher.isNotable(SOME_ITEM, 3, 33_333, true));
+		assertTrue(NotableLootFlusher.isNotable(SOME_ITEM, 3, 33_334, true));
+	}
 }

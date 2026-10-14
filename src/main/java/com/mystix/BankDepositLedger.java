@@ -18,13 +18,13 @@ final class BankDepositLedger {
 	/** Ticks after a "Deposit" click (or with a deposit interface open) during which removed items count as deposited. */
 	static final int DEPOSIT_WINDOW_TICKS = 3;
 
-	private final Supplier<Map<Integer, Integer>> seed;
-	private final Map<Integer, Integer> deposits = new LinkedHashMap<>();
+	private final Supplier<Map<Integer, Long>> seed;
+	private final Map<Integer, Long> deposits = new LinkedHashMap<>();
 	private boolean seeded;
 	private boolean interfaceOpen;
 	private int lastDepositClickTick = Integer.MIN_VALUE;
 
-	BankDepositLedger(Supplier<Map<Integer, Integer>> seed) {
+	BankDepositLedger(Supplier<Map<Integer, Long>> seed) {
 		this.seed = seed == null ? Map::of : seed;
 	}
 
@@ -45,28 +45,28 @@ final class BankDepositLedger {
 	 * Items that left the inventory or gear (canonical id to quantity) on
 	 * {@code tick}. Returns true when they were counted as deposits.
 	 */
-	boolean onItemsRemoved(Map<Integer, Integer> removed, int tick) {
+	boolean onItemsRemoved(Map<Integer, Long> removed, int tick) {
 		if (removed == null || removed.isEmpty() || !inDepositContext(tick)) {
 			return false;
 		}
 		ensureSeeded();
 		removed.forEach((id, qty) -> {
 			if (qty != null && qty > 0) {
-				deposits.merge(id, qty, Integer::sum);
+				deposits.merge(id, qty, Long::sum);
 			}
 		});
 		return true;
 	}
 
 	/** A storage item (barrel, sack...) was emptied into a deposit box: its contents are banked too. */
-	void onContainerEmptied(Map<Integer, Integer> contents) {
+	void onContainerEmptied(Map<Integer, Long> contents) {
 		if (contents == null || contents.isEmpty()) {
 			return;
 		}
 		ensureSeeded();
 		contents.forEach((id, qty) -> {
 			if (id != null && qty != null && qty > 0) {
-				deposits.merge(id, qty, Integer::sum);
+				deposits.merge(id, qty, Long::sum);
 			}
 		});
 	}
@@ -87,7 +87,7 @@ final class BankDepositLedger {
 		deposits.clear();
 	}
 
-	Map<Integer, Integer> contents() {
+	Map<Integer, Long> contents() {
 		return new LinkedHashMap<>(deposits);
 	}
 
@@ -96,11 +96,11 @@ final class BankDepositLedger {
 			return;
 		}
 		seeded = true;
-		Map<Integer, Integer> server = seed.get();
+		Map<Integer, Long> server = seed.get();
 		if (server != null) {
 			server.forEach((id, qty) -> {
 				if (id != null && qty != null && qty > 0) {
-					deposits.merge(id, qty, Integer::sum);
+					deposits.merge(id, qty, Long::sum);
 				}
 			});
 		}

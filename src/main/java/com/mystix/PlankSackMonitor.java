@@ -51,7 +51,7 @@ public class PlankSackMonitor {
 
 	private boolean dirty;
 	private GameState previousGameState = GameState.UNKNOWN;
-	private volatile BiConsumer<String, Map<Integer, Integer>> snapshotListener;
+	private volatile BiConsumer<String, Map<Integer, Long>> snapshotListener;
 
 	@Inject
 	public PlankSackMonitor(
@@ -67,7 +67,7 @@ public class PlankSackMonitor {
 				apiClient::sendBankSync);
 	}
 
-	public void setSnapshotListener(BiConsumer<String, Map<Integer, Integer>> listener) {
+	public void setSnapshotListener(BiConsumer<String, Map<Integer, Long>> listener) {
 		this.snapshotListener = listener;
 	}
 
@@ -110,8 +110,8 @@ public class PlankSackMonitor {
 			return;
 		}
 		dirty = false;
-		Map<Integer, Integer> contents = contents(client::getVarbitValue);
-		BiConsumer<String, Map<Integer, Integer>> listener = snapshotListener;
+		Map<Integer, Long> contents = ItemCollector.widen(contents(client::getVarbitValue));
+		BiConsumer<String, Map<Integer, Long>> listener = snapshotListener;
 		if (listener != null) {
 			listener.accept(SOURCE, contents);
 		}

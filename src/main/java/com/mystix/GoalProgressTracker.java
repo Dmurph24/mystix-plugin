@@ -97,13 +97,15 @@ public class GoalProgressTracker implements GoalProgressState.SyncHooks {
 			return;
 		}
 		ItemContainer container = event.getItemContainer();
-		Map<Integer, Integer> quantities = new HashMap<>();
+		// Long sums: noted + unnoted fold onto one id, and OSRS lifted max cash.
+		Map<Integer, Long> quantities = new HashMap<>();
 		if (container != null) {
 			for (Item item : container.getItems()) {
 				if (item == null || item.getId() <= 0 || item.getQuantity() <= 0) {
 					continue;
 				}
-				quantities.merge(canonicalItemId(item.getId()), item.getQuantity(), Integer::sum);
+				long quantity = item.getQuantity();
+				quantities.merge(canonicalItemId(item.getId()), quantity, Long::sum);
 			}
 		}
 		state.onInventoryChanged(equipment, quantities);
@@ -120,9 +122,9 @@ public class GoalProgressTracker implements GoalProgressState.SyncHooks {
 			if (BankMemoryMonitor.SOURCE_INVENTORY.equals(e.getKey()) || e.getValue() == null) {
 				continue;
 			}
-			Map<Integer, Integer> quantities = new HashMap<>();
+			Map<Integer, Long> quantities = new HashMap<>();
 			for (BankSyncPayload.BankItem item : e.getValue()) {
-				quantities.merge(canonicalItemId(item.getItemId()), item.getQuantity(), Integer::sum);
+				quantities.merge(canonicalItemId(item.getItemId()), item.getQuantity(), Long::sum);
 			}
 			state.onContainerSnapshot(e.getKey(), quantities);
 		}
@@ -134,14 +136,14 @@ public class GoalProgressTracker implements GoalProgressState.SyncHooks {
 	 * its contents become this session's snapshot for that source, so moving
 	 * items into it no longer reads as a loss. Client thread.
 	 */
-	public void onContainerSnapshot(String source, Map<Integer, Integer> quantities) {
-		Map<Integer, Integer> canonical = new HashMap<>();
+	public void onContainerSnapshot(String source, Map<Integer, Long> quantities) {
+		Map<Integer, Long> canonical = new HashMap<>();
 		if (quantities != null) {
-			for (Map.Entry<Integer, Integer> e : quantities.entrySet()) {
+			for (Map.Entry<Integer, Long> e : quantities.entrySet()) {
 				if (e.getKey() == null || e.getValue() == null || e.getValue() <= 0) {
 					continue;
 				}
-				canonical.merge(canonicalItemId(e.getKey()), e.getValue(), Integer::sum);
+				canonical.merge(canonicalItemId(e.getKey()), e.getValue(), Long::sum);
 			}
 		}
 		state.onContainerSnapshot(source, canonical);
@@ -258,7 +260,7 @@ public class GoalProgressTracker implements GoalProgressState.SyncHooks {
 	}
 
 	/** What the server last held in a bank-memory source for each in-progress owned goal's item. */
-	public Map<Integer, Integer> serverHeldFor(String source) {
+	public Map<Integer, Long> serverHeldFor(String source) {
 		return state.serverHeldFor(source);
 	}
 

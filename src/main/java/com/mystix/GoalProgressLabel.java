@@ -12,7 +12,7 @@ final class GoalProgressLabel {
 	private GoalProgressLabel() {
 	}
 
-	static String format(GoalType type, int current, int target, Integer percent) {
+	static String format(GoalType type, long current, long target, Integer percent) {
 		if (type == GoalType.FARMING_TIMER && target <= 1) {
 			return (percent == null ? 0 : percent) + "% grown";
 		}
@@ -31,7 +31,7 @@ final class GoalProgressLabel {
 		return percent == null ? 0 : Math.max(0, Math.min(100, percent)) / 100d;
 	}
 
-	private static String fmt(int value, boolean abbreviate) {
+	private static String fmt(long value, boolean abbreviate) {
 		long v = Math.max(0, value);
 		return abbreviate ? QuantityFormatter.quantityToStackSize(v) : QuantityFormatter.formatNumber(v);
 	}

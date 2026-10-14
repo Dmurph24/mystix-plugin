@@ -28,11 +28,14 @@ public class RoadmapGoal {
 	@SerializedName("image_url")
 	private String imageUrl;
 
+	// current / target (and the held_* quantities below) are longs: net worth
+	// and owned-coins goals pass 2,147,483,647 (OSRS lifted the max-cash cap),
+	// and an int field would make Gson reject the whole roadmap response.
 	@SerializedName("current")
-	private int current;
+	private long current;
 
 	@SerializedName("target")
-	private int target;
+	private long target;
 
 	@SerializedName("progress_percent")
 	private Integer progressPercent;
@@ -153,16 +156,16 @@ public class RoadmapGoal {
 		private String timerType;
 
 		@SerializedName("start_qty")
-		private Integer startQty;
+		private Long startQty;
 
 		@SerializedName("held_bank")
-		private Integer heldBank;
+		private Long heldBank;
 
 		@SerializedName("held_vaults")
-		private Integer heldVaults;
+		private Long heldVaults;
 
 		@SerializedName("held_by_source")
-		private Map<String, Integer> heldBySource;
+		private Map<String, Long> heldBySource;
 	}
 
 	public String getGoalType() {
@@ -187,11 +190,11 @@ public class RoadmapGoal {
 		return imageUrl;
 	}
 
-	public int getCurrent() {
+	public long getCurrent() {
 		return current;
 	}
 
-	public int getTarget() {
+	public long getTarget() {
 		return target;
 	}
 
@@ -239,17 +242,17 @@ public class RoadmapGoal {
 	}
 
 	/** Owned-item goals: how many the player held when the goal was created. */
-	public Integer getStartQty() {
+	public Long getStartQty() {
 		return meta == null ? null : meta.startQty;
 	}
 
 	/** Owned-item goals: quantity in the bank proper at the server's last upload. */
-	public Integer getHeldBank() {
+	public Long getHeldBank() {
 		return meta == null ? null : meta.heldBank;
 	}
 
 	/** Owned-item goals: quantity in vaults (seed vault, looting bag, potion storage). */
-	public Integer getHeldVaults() {
+	public Long getHeldVaults() {
 		return meta == null ? null : meta.heldVaults;
 	}
 
@@ -258,7 +261,7 @@ public class RoadmapGoal {
 	 * holds, storage items) as the server last saw them; null from older
 	 * servers that only send {@code held_bank} / {@code held_vaults}.
 	 */
-	public Map<String, Integer> getHeldBySource() {
+	public Map<String, Long> getHeldBySource() {
 		return meta == null ? null : meta.heldBySource;
 	}
 

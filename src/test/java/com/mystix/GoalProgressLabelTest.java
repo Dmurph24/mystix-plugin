@@ -29,4 +29,11 @@ public class GoalProgressLabelTest {
 		assertEquals(1d, GoalProgressLabel.fraction(150), 0.0001);
 		assertEquals(0.25d, GoalProgressLabel.fraction(25), 0.0001);
 	}
+
+	@Test
+	public void formatsValuesPastMaxCash() {
+		assertEquals("5B / 10B", GoalProgressLabel.format(GoalType.NET_WORTH, 5_000_000_000L, 10_000_000_000L, 50));
+		assertEquals("5,000,000,000 / 6,000,000,000",
+				GoalProgressLabel.format(GoalType.ITEM_OWNED, 5_000_000_000L, 6_000_000_000L, 83));
+	}
 }

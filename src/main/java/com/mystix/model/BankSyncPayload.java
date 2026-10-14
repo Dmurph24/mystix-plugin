@@ -36,13 +36,15 @@ public class BankSyncPayload {
 	}
 
 	/**
-	 * Represents a single bank item with ID and quantity.
+	 * Represents a single bank item with ID and quantity. The quantity is a
+	 * long: OSRS lifted the 2,147,483,647 max-cash cap, so a stack (or a sum
+	 * of stacks folded onto one canonical id) can exceed int range.
 	 */
 	public static class BankItem {
 		private final int item_id;
-		private final int quantity;
+		private final long quantity;
 
-		public BankItem(int itemId, int quantity) {
+		public BankItem(int itemId, long quantity) {
 			this.item_id = itemId;
 			this.quantity = quantity;
 		}
@@ -51,7 +53,7 @@ public class BankSyncPayload {
 			return item_id;
 		}
 
-		public int getQuantity() {
+		public long getQuantity() {
 			return quantity;
 		}
 	}
