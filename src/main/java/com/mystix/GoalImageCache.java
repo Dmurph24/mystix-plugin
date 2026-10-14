@@ -3,7 +3,6 @@ package com.mystix;
 import java.awt.image.BufferedImage;
 import java.io.IOException;
 import java.io.InputStream;
-import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
@@ -35,14 +34,13 @@ public class GoalImageCache {
 	static final int ICON_SIZE = 32;
 	private static final int FETCH_TIMEOUT_SECONDS = 10;
 	/**
-	 * The only places goal images are fetched from, as host to path prefixes:
-	 * Mystix's own images (rendered from the game cache under /game-images/,
-	 * or copied from the wiki under /wiki-images/), and the wiki itself, which
-	 * the Mystix API keeps sending until it switches over to its own images.
+	 * The only places goal images are fetched from, as host to path prefix:
+	 * anything on Mystix's own media host, and the wiki's images, which the
+	 * Mystix API keeps sending until it switches over to its own.
 	 */
-	static final Map<String, List<String>> ALLOWED_IMAGE_SOURCES = Map.of(
-			"media.mystix.app", List.of("/game-images/", "/wiki-images/"),
-			"oldschool.runescape.wiki", List.of("/images/"));
+	static final Map<String, String> ALLOWED_IMAGE_SOURCES = Map.of(
+			"media.mystix.app", "/",
+			"oldschool.runescape.wiki", "/images/");
 
 	private final OkHttpClient httpClient;
 	private final ScheduledExecutorService executorService;
@@ -83,9 +81,8 @@ public class GoalImageCache {
 		if (parsed == null || !parsed.isHttps() || parsed.port() != 443) {
 			return false;
 		}
-		List<String> pathPrefixes = ALLOWED_IMAGE_SOURCES.getOrDefault(parsed.host(), List.of());
-		String path = parsed.encodedPath();
-		return pathPrefixes.stream().anyMatch(path::startsWith);
+		String pathPrefix = ALLOWED_IMAGE_SOURCES.get(parsed.host());
+		return pathPrefix != null && parsed.encodedPath().startsWith(pathPrefix);
 	}
 
 	public void clear() {
