@@ -29,9 +29,11 @@ public class GoalImageCacheTest {
 	}
 
 	@Test
-	public void onlyWikiImagesAreFetched() {
+	public void onlyAllowedImageSourcesAreFetched() {
 		assertTrue(GoalImageCache.isAllowed("https://oldschool.runescape.wiki/images/Zulrah.png"));
 		assertTrue(GoalImageCache.isAllowed("https://oldschool.runescape.wiki/images/Attack_icon.png?7d0d4"));
+		assertTrue(GoalImageCache.isAllowed("https://media.mystix.app/wiki-images/Zulrah.png"));
+		assertTrue(GoalImageCache.isAllowed("https://media.mystix.app/wiki-images/Zulrah%27s_scales.png"));
 
 		assertFalse(GoalImageCache.isAllowed(null));
 		assertFalse(GoalImageCache.isAllowed(""));
@@ -41,5 +43,14 @@ public class GoalImageCacheTest {
 		assertFalse(GoalImageCache.isAllowed("https://oldschool.runescape.wiki@example.com/images/Zulrah.png"));
 		assertFalse(GoalImageCache.isAllowed("https://oldschool.runescape.wiki:8443/images/Zulrah.png"));
 		assertFalse(GoalImageCache.isAllowed("https://oldschool.runescape.wiki/w/Zulrah"));
+		// Each host only serves its own path: no wiki paths on the Mystix host, and back.
+		assertFalse(GoalImageCache.isAllowed("https://media.mystix.app/images/Zulrah.png"));
+		assertFalse(GoalImageCache.isAllowed("https://oldschool.runescape.wiki/wiki-images/Zulrah.png"));
+		assertFalse(GoalImageCache.isAllowed("https://media.mystix.app/poll-images/1.png"));
+		assertFalse(GoalImageCache.isAllowed("https://media.mystix.app/wiki-images/../uploads/x.png"));
+		assertFalse(GoalImageCache.isAllowed("http://media.mystix.app/wiki-images/Zulrah.png"));
+		assertFalse(GoalImageCache.isAllowed("https://media.mystix.app:8443/wiki-images/Zulrah.png"));
+		assertFalse(GoalImageCache.isAllowed("https://media.mystix.app.example.com/wiki-images/Zulrah.png"));
+		assertFalse(GoalImageCache.isAllowed("https://d1234abcd.cloudfront.net/wiki-images/Zulrah.png"));
 	}
 }

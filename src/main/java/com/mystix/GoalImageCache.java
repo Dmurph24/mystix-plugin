@@ -20,9 +20,9 @@ import okhttp3.Response;
 
 /**
  * In-memory cache of goal artwork (OSRS Wiki images for bosses, combat tasks
- * and the like), scaled to overlay icon size. Only images on the hardcoded
- * {@link #WIKI_HOST} are fetched; any other URL the server sends is ignored,
- * so the plugin never contacts a host taken from a server response. Images are
+ * and the like), scaled to overlay icon size. Only images under the hardcoded
+ * {@link #ALLOWED_IMAGE_SOURCES} are fetched; any other URL the server sends is
+ * ignored, so the plugin never contacts a host taken from a server response. Images are
  * fetched once per URL on the background executor; until one arrives
  * {@link #get} returns null and the overlay simply draws no icon. Failed URLs
  * are not retried for the rest of the session.
@@ -33,9 +33,14 @@ public class GoalImageCache {
 	/** Icons are scaled to fit this square, matching RuneLite's item sprites. */
 	static final int ICON_SIZE = 32;
 	private static final int FETCH_TIMEOUT_SECONDS = 10;
-	/** The only host goal images are fetched from. */
-	static final String WIKI_HOST = "oldschool.runescape.wiki";
-	private static final String WIKI_IMAGE_PATH = "/images/";
+	/**
+	 * The only places goal images are fetched from, as host to path prefix:
+	 * Mystix's own copy of the wiki's images, and the wiki itself, which the
+	 * Mystix API keeps sending until it switches over to its copy.
+	 */
+	static final Map<String, String> ALLOWED_IMAGE_SOURCES = Map.of(
+			"media.mystix.app", "/wiki-images/",
+			"oldschool.runescape.wiki", "/images/");
 
 	private final OkHttpClient httpClient;
 	private final ScheduledExecutorService executorService;
@@ -70,14 +75,14 @@ public class GoalImageCache {
 		return null;
 	}
 
-	/** True when the URL is an https image on the OSRS Wiki. */
+	/** True when the URL is an https image under one of {@link #ALLOWED_IMAGE_SOURCES}. */
 	static boolean isAllowed(String url) {
 		HttpUrl parsed = url == null ? null : HttpUrl.parse(url);
-		return parsed != null
-				&& parsed.isHttps()
-				&& WIKI_HOST.equals(parsed.host())
-				&& parsed.port() == 443
-				&& parsed.encodedPath().startsWith(WIKI_IMAGE_PATH);
+		if (parsed == null || !parsed.isHttps() || parsed.port() != 443) {
+			return false;
+		}
+		String pathPrefix = ALLOWED_IMAGE_SOURCES.get(parsed.host());
+		return pathPrefix != null && parsed.encodedPath().startsWith(pathPrefix);
 	}
 
 	public void clear() {
