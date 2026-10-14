@@ -34,6 +34,10 @@ public class GoalImageCacheTest {
 		assertTrue(GoalImageCache.isAllowed("https://oldschool.runescape.wiki/images/Attack_icon.png?7d0d4"));
 		assertTrue(GoalImageCache.isAllowed("https://media.mystix.app/wiki-images/Zulrah.png"));
 		assertTrue(GoalImageCache.isAllowed("https://media.mystix.app/wiki-images/Zulrah%27s_scales.png"));
+		// Exactly as the API builds them: quotes and parentheses left as is, "+" escaped.
+		assertTrue(GoalImageCache.isAllowed("https://media.mystix.app/wiki-images/Zulrah's_scales_5.png"));
+		assertTrue(GoalImageCache.isAllowed("https://media.mystix.app/wiki-images/Skull_(status)_icon.png"));
+		assertTrue(GoalImageCache.isAllowed("https://media.mystix.app/wiki-images/Anti-venom%2B(4).png"));
 
 		assertFalse(GoalImageCache.isAllowed(null));
 		assertFalse(GoalImageCache.isAllowed(""));
